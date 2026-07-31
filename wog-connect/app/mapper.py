@@ -72,8 +72,8 @@ def _addr(a, *, name1_max: int = RECIPIENT_NAME1_MAX) -> dict[str, Any]:
         name2 = overflow_name2
     if name2:
         out["name2"] = name2
-    if a.email:
-        out["email"] = a.email.strip()[:254]
+    # customer/recipient.email ist in der Barcode-API nicht erlaubt (HTTP 400, leerer Body).
+    # Empfänger-Mail nur über attributes.notifications senden.
     return out
 
 
