@@ -21,35 +21,52 @@ In `.env` Benutzer und Passwort eintragen:
 ```env
 EZOLL_USER=...
 EZOLL_PASSWORD=...
+EZOLL_FIRMA=100
 EZOLL_HEADED=true
 ```
 
-## Befehle
+## Bürgschaft abfragen
+
+Entspricht dem PDF „Abfrage Bürgschaft Schritt für Schritt“:
+
+1. Login  
+2. Firmennummer + Enter  
+3. `2` Andere Zollverfahren + Enter  
+4. `12` Archiv/Evidenz + Enter  
+5. Datum ab (≥ ½ Jahr) + MsgTy `CC015C`, Enter, F10  
+6. Bild-ab bis letzte Seite → **… EUR Bürgschaft**
 
 ```bash
-# Verbindung / Login testen (Browser sichtbar)
-python -m ezoll login-test
-
-# Aktuellen Screen speichern (artifacts/)
-python -m ezoll screen
-
-# Tasten senden
-python -m ezoll send "F3"
-python -m ezoll send "text:ABC123,Enter"
-
-# Wert per Regex holen
-python -m ezoll extract --pattern "Status\\s*[:=]\\s*(\\S+)"
-
-# Periodisch auslesen
-python -m ezoll watch --pattern "Status\\s*[:=]\\s*(\\S+)" --interval 30
-
-# Makro ausführen
-python -m ezoll macro macros/beispiel.macro
+python -m ezoll buergschaft
 ```
 
-Screenshots und Screen-Dumps landen in `artifacts/`.
+Nur den Betrag ausgeben bzw. periodisch:
 
-## Nächster Schritt
+```bash
+python -m ezoll buergschaft
+python -m ezoll buergschaft --watch 300
+```
 
-Schick eine Bildschirmaufnahme des gewünschten Ablaufs (Login → Maske → Feld).
-Dann wird die Navigation als konkretes Makro hinterlegt und der Zielwert stabil ausgelesen.
+Optionen:
+
+```bash
+python -m ezoll buergschaft --firma 100 --datum-von 20260101 --msgty CC015C
+```
+
+Zwischenschritte landen als Screenshot/Text in `artifacts/` (`01-…` bis `06-…`).
+
+Wenn der Filter nicht greift, Tab-Anzahl anpassen:
+
+```env
+EZOLL_MSGTY_TABS=2
+```
+
+## Weitere Befehle
+
+```bash
+python -m ezoll login-test
+python -m ezoll screen
+python -m ezoll send "F3"
+python -m ezoll extract --pattern "([\\d.]+,\\d{2})\\s*EUR\\s*Bürgschaft"
+python -m ezoll macro macros/buergschaft.macro
+```

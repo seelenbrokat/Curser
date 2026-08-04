@@ -17,6 +17,10 @@ class Settings:
     password: str
     headed: bool
     channel: str | None
+    firma: str
+    msgty: str
+    datum_von: str | None
+    msgty_tabs: int
     timeout_ms: int = 30_000
 
 
@@ -36,6 +40,11 @@ def load_settings() -> Settings:
         "on",
     }
     channel = os.getenv("EZOLL_CHANNEL", "").strip() or None
+    datum_von = os.getenv("EZOLL_DATUM_VON", "").strip() or None
+    try:
+        msgty_tabs = int(os.getenv("EZOLL_MSGTY_TABS", "1").strip() or "1")
+    except ValueError as exc:
+        raise SystemExit("EZOLL_MSGTY_TABS muss eine Ganzzahl sein.") from exc
     return Settings(
         url=os.getenv(
             "EZOLL_URL", "https://zoll.ldv.at/ts/ts2/start_new.html"
@@ -44,4 +53,8 @@ def load_settings() -> Settings:
         password=password,
         headed=headed,
         channel=channel,
+        firma=os.getenv("EZOLL_FIRMA", "100").strip() or "100",
+        msgty=os.getenv("EZOLL_MSGTY", "CC015C").strip() or "CC015C",
+        datum_von=datum_von,
+        msgty_tabs=msgty_tabs,
     )

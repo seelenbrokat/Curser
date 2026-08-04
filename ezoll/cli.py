@@ -4,6 +4,7 @@ from pathlib import Path
 
 import click
 
+from .buergschaft import query_buergschaft
 from .client import EzollClient
 from .config import load_settings
 
@@ -113,6 +114,71 @@ def macro_cmd(file: Path, login: bool) -> None:
         click.echo(snap.text[:4000] if snap.text else "(leer)")
         if snap.saved_path:
             click.echo(f"\nGespeichert: {snap.saved_path}")
+
+
+@main.command("buergschaft")
+@click.option("--firma", default=None, help="Firmennummer (Default: EZOLL_FIRMA / 100)")
+@click.option("--msgty", default=None, help="Message-Type (Default: CC015C)")
+@click.option(
+    "--datum-von",
+    default=None,
+    help="Datum von YYYYMMDD (Default: heute minus 6 Monate)",
+)
+@click.option(
+    "--msgty-tabs",
+    type=int,
+    default=None,
+    help="Tabs vom Datumsfeld zum MsgTy-Feld",
+)
+@click.option(
+    "--watch",
+    type=float,
+    default=None,
+    help="Optional: alle N Sekunden erneut abfragen",
+)
+def buergschaft_cmd(
+    firma: str | None,
+    msgty: str | None,
+    datum_von: str | None,
+    msgty_tabs: int | None,
+    watch: float | None,
+) -> None:
+    """Bürgschafts-Gesamtbelastung laut Arbeitsschritte-PDF abfragen."""
+    settings = load_settings()
+
+    def run_once() -> str:
+        with EzollClient(settings) as client:
+
+            def on_step(label: str, snap) -> None:
+                client.screenshot(label)
+                click.echo(f"[{label}] screen={snap.saved_path}", err=True)
+
+            result = query_buergschaft(
+                client,
+                firma=firma or settings.firma,
+                msgty=msgty or settings.msgty,
+                datum_von=datum_von or settings.datum_von,
+                msgty_tabs=settings.msgty_tabs if msgty_tabs is None else msgty_tabs,
+                on_step=on_step,
+            )
+            click.echo(
+                f"{result.amount} EUR Bürgschaft  (Seiten geblättert: {result.pages})",
+                err=True,
+            )
+            return result.amount
+
+    if watch is None:
+        click.echo(run_once())
+        return
+
+    import time
+
+    while True:
+        try:
+            click.echo(run_once())
+        except Exception as exc:  # noqa: BLE001 - Watch soll weiterlaufen
+            click.echo(f"Fehler: {exc}", err=True)
+        time.sleep(watch)
 
 
 if __name__ == "__main__":
