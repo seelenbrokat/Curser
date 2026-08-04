@@ -1,0 +1,27 @@
+# Abfrage Bürgschaft – manuelle Variante der PDF-Arbeitsschritte.
+# Bevorzugt: python -m ezoll buergschaft
+#
+# 1. Login geschieht über --login (Default)
+# 2. Firmennummer
+TYPE 100
+ENTER
+WAIT 1
+# 3. Andere Zollverfahren
+TYPE 2
+ENTER
+WAIT 1
+# 4. Archiv/Evidenz
+TYPE 12
+ENTER
+WAIT 1.5
+# 5. Filter: Datum von (YYYYMMDD) + MsgTy CC015C, Enter, F10
+#    Datum bei Bedarf anpassen oder den buergschaft-Befehl nutzen.
+TYPE 20260101
+KEY Tab
+TYPE CC015C
+ENTER
+WAIT 0.5
+KEY F10
+WAIT 1
+SCREEN
+# 6. Danach manuell bzw. per buergschaft-Befehl: PageDown bis Ende

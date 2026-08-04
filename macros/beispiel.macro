@@ -1,0 +1,9 @@
+# Beispiel-Makro – wird nach deiner Bildschirmaufnahme konkretisiert.
+# Befehle: KEY, TYPE, ENTER, WAIT, SCREEN
+
+# WAIT 1
+# TYPE menuepunkt
+# ENTER
+# WAIT 1.5
+# KEY F3
+# SCREEN
