@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  role      String   @default("customer")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  rentals   Rental[]
+}
+
+model Vehicle {
+  id            String   @id @default(cuid())
+  licensePlate  String   @unique
+  brand         String
+  model         String
+  year          Int
+  color         String
+  description   String?
+  imageUrl      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  rentals       Rental[]
+}
+
+model Rental {
+  id              String   @id @default(cuid())
+  accessToken     String   @unique
+  userId          String
+  vehicleId       String
+  status          String   @default("pending")
+  startDate       DateTime
+  endDate         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id])
+  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])
+  
+  pickupInspection   Inspection? @relation("PickupInspection")
+  returnInspection   Inspection? @relation("ReturnInspection")
+  contract           Contract?
+}
+
+model Inspection {
+  id                String   @id @default(cuid())
+  type              String
+  status            String   @default("pending")
+  kmStand           Int?
+  kmStandImageUrl   String?
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  rentalPickup      Rental?  @relation("PickupInspection", fields: [rentalPickupId], references: [id])
+  rentalPickupId    String?  @unique
+  
+  rentalReturn      Rental?  @relation("ReturnInspection", fields: [rentalReturnId], references: [id])
+  rentalReturnId    String?  @unique
+  
+  photos            InspectionPhoto[]
+}
+
+model InspectionPhoto {
+  id              String   @id @default(cuid())
+  inspectionId    String
+  position        String
+  imageUrl        String
+  analysisResult  String?
+  isValid         Boolean  @default(false)
+  feedback        String?
+  createdAt       DateTime @default(now())
+  
+  inspection      Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+}
+
+model Contract {
+  id              String   @id @default(cuid())
+  rentalId        String   @unique
+  pdfUrl          String?
+  signedAt        DateTime?
+  createdAt       DateTime @default(now())
+  
+  rental          Rental   @relation(fields: [rentalId], references: [id])
+}
