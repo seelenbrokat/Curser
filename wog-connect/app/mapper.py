@@ -15,9 +15,13 @@ _GMBH = re.compile(r"\bgmbh\b", re.I)
 _BAD_CHARS = re.compile(r"[''`´‘’‚‛″‟\"«»]")
 _MULTI_SPACE = re.compile(r"\s+")
 
-# Swiss Post: customer.name1 max 25, recipient.name1 max 35
+# Swiss Post: customer.* max 25, recipient.* max 35
 CUSTOMER_NAME1_MAX = 25
+CUSTOMER_STREET_MAX = 25
+CUSTOMER_CITY_MAX = 25
 RECIPIENT_NAME1_MAX = 35
+RECIPIENT_STREET_MAX = 35
+RECIPIENT_CITY_MAX = 35
 NAME2_MAX = 35
 
 
@@ -37,6 +41,12 @@ def _sanitize_name2(value: str) -> str:
     return value[:NAME2_MAX]
 
 
+def _sanitize_text(value: str, max_len: int) -> str:
+    value = _MULTI_SPACE.sub(" ", (value or "").strip())
+    value = _BAD_CHARS.sub("", value)
+    return value[:max_len]
+
+
 def _split_name_lines(value: str, name1_max: int) -> tuple[str, str | None]:
     """Lange Firmennamen auf name1/name2 aufteilen (nach Säuberung)."""
     cleaned = _MULTI_SPACE.sub(" ", (value or "").strip())
@@ -48,7 +58,6 @@ def _split_name_lines(value: str, name1_max: int) -> tuple[str, str | None]:
         return "Unbekannt", None
     if len(cleaned) <= name1_max:
         return cleaned, None
-    # Am Wortende schneiden, Rest nach name2
     cut = cleaned[:name1_max]
     if " " in cut:
         cut = cut.rsplit(" ", 1)[0]
@@ -58,13 +67,19 @@ def _split_name_lines(value: str, name1_max: int) -> tuple[str, str | None]:
     return name1 or "Unbekannt", name2 or None
 
 
-def _addr(a, *, name1_max: int = RECIPIENT_NAME1_MAX) -> dict[str, Any]:
+def _addr(
+    a,
+    *,
+    name1_max: int = RECIPIENT_NAME1_MAX,
+    street_max: int = RECIPIENT_STREET_MAX,
+    city_max: int = RECIPIENT_CITY_MAX,
+) -> dict[str, Any]:
     name1, overflow_name2 = _split_name_lines(a.name1, name1_max)
     out: dict[str, Any] = {
         "name1": name1,
-        "street": collapse_duplicate_house(a.street)[:35],
-        "zip": a.zip_code.strip()[:10],
-        "city": a.city.strip()[:35],
+        "street": _sanitize_text(collapse_duplicate_house(a.street), street_max) or "–",
+        "zip": (a.zip_code or "").strip()[:10],
+        "city": _sanitize_text(a.city, city_max) or "–",
         "country": (a.country or "CH").strip()[:2],
     }
     name2 = _sanitize_name2(a.name2) if a.name2 else ""
@@ -77,6 +92,20 @@ def _addr(a, *, name1_max: int = RECIPIENT_NAME1_MAX) -> dict[str, Any]:
     return out
 
 
+def _wog_sender_customer(settings: Settings) -> dict[str, Any]:
+    name1, name2 = _split_name_lines(settings.post_sender_name1, CUSTOMER_NAME1_MAX)
+    customer = {
+        "name1": name1,
+        "street": _sanitize_text(settings.post_sender_street, CUSTOMER_STREET_MAX),
+        "zip": (settings.post_sender_zip or "").strip()[:10],
+        "city": _sanitize_text(settings.post_sender_city, CUSTOMER_CITY_MAX),
+        "country": (settings.post_sender_country or "CH").strip()[:2],
+    }
+    if name2:
+        customer["name2"] = name2
+    return customer
+
+
 def build_post_request(
     shipment: ShipmentDraft,
     settings: Settings,
@@ -84,22 +113,24 @@ def build_post_request(
     delivery_product_id: str | None = None,
     piece_number: int = 1,
     piece_count: int = 1,
+    use_wog_sender: bool = False,
 ) -> dict[str, Any]:
-    if settings.post_label_sender_from_soloplan:
-        customer = _addr(shipment.sender, name1_max=CUSTOMER_NAME1_MAX)
+    if use_wog_sender or not settings.post_label_sender_from_soloplan:
+        customer = _wog_sender_customer(settings)
     else:
-        name1, name2 = _split_name_lines(settings.post_sender_name1, CUSTOMER_NAME1_MAX)
-        customer = {
-            "name1": name1,
-            "street": settings.post_sender_street,
-            "zip": settings.post_sender_zip,
-            "city": settings.post_sender_city,
-            "country": settings.post_sender_country,
-        }
-        if name2:
-            customer["name2"] = name2
+        customer = _addr(
+            shipment.sender,
+            name1_max=CUSTOMER_NAME1_MAX,
+            street_max=CUSTOMER_STREET_MAX,
+            city_max=CUSTOMER_CITY_MAX,
+        )
 
-    recipient = _addr(shipment.recipient, name1_max=RECIPIENT_NAME1_MAX)
+    recipient = _addr(
+        shipment.recipient,
+        name1_max=RECIPIENT_NAME1_MAX,
+        street_max=RECIPIENT_STREET_MAX,
+        city_max=RECIPIENT_CITY_MAX,
+    )
     przl = shipment.przl or przl_for_product(delivery_product_id) or settings.post_przl
     attributes: dict[str, Any] = {
         "przl": przl,
