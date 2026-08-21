@@ -63,6 +63,47 @@ class TourProcessor:
         self.shippingnet = ShippingNetClient(self.settings)
         self.address_validator = AddressValidator(self.settings, self.post)
 
+
+    def _apply_address_book(self, draft: ShipmentDraft) -> ShipmentDraft:
+        """Ersetzt Empfängeradresse durch Korrektur aus dem Adressbuch (Soloplan-Matchcode)."""
+        book = self.storage.get_address_book()
+        new_recipient, entry = book.apply_to_draft_recipient(
+            draft.recipient,
+            soloplan_matchcode=getattr(draft, "recipient_matchcode", "") or "",
+        )
+        if not entry:
+            return draft
+        return replace(
+            draft,
+            recipient=new_recipient,
+            recipient_matchcode=entry.get("soloplan_matchcode") or draft.recipient_matchcode,
+            recipient_bp_id=entry.get("soloplan_bp_id") or draft.recipient_bp_id,
+        )
+
+
+    def save_recipient_to_address_book(self, shipment_id: str) -> dict:
+        row = self.storage.get_shipment(shipment_id)
+        if not row:
+            raise ValueError("Sendung nicht gefunden")
+        draft = draft_from_row(row)
+        if draft is None:
+            raise ValueError("Keine Sendungsdaten")
+        r = draft.recipient
+        return self.storage.upsert_address_book_entry(
+            name1=r.name1,
+            name2=r.name2,
+            street=r.street,
+            zip_code=r.zip_code,
+            city=r.city,
+            country=r.country or "CH",
+            email=r.email,
+            soloplan_matchcode=draft.recipient_matchcode or None,
+            soloplan_bp_id=draft.recipient_bp_id or None,
+            notes="Manuell korrigiert in WOG Connect",
+            source_shipment_id=shipment_id,
+        )
+
+
     @staticmethod
     def _decode_tour_json(content: bytes) -> dict:
         return coerce_tour_document(json.loads(content.decode("utf-8-sig")))
@@ -113,6 +154,7 @@ class TourProcessor:
             if self.storage.find_shipment_key(tour_id, draft.transport_order_number, draft.item_number):
                 skipped += 1
                 continue
+            draft = self._apply_address_book(draft)
             sid = self.storage.add_shipment(tour_id, draft)
             shipment_ids.append(sid)
             if auto_label:
@@ -208,6 +250,10 @@ class TourProcessor:
             base["przl"] = przl_for_product(pid)
         if "notify_recipient" in payload:
             base["notify_recipient"] = bool(payload["notify_recipient"])
+        # Soloplan-Referenz behalten (falls im Draft vorhanden)
+        if base.get("recipient_matchcode"):
+            # already in base; draft_from_dict maps it
+            pass
         draft = draft_from_dict(base)
         draft_data = draft_to_dict(draft, delivery_product_id=base.get("delivery_product_id", "eco"))
         # Tracking & Adressprüfung behalten; bei Adressänderung Prüfung zurücksetzen
@@ -216,8 +262,16 @@ class TourProcessor:
         if not recipient_changed and base.get("address_validation"):
             draft_data["address_validation"] = base["address_validation"]
         self.storage.update_shipment_details(shipment_id, draft_data)
+
+        address_book_entry = None
+        if payload.get("save_to_address_book"):
+            address_book_entry = self.save_recipient_to_address_book(shipment_id)
+
         warn = weight_warning(draft.weight_grams, draft.packstuecke)
         out: dict = {"ok": True, "shipmentId": shipment_id, "saved": True}
+        if address_book_entry:
+            out["addressBook"] = address_book_entry
+            out["addressBookSaved"] = True
         if warn:
             out["weight_warning"] = warn
             out["warnings"] = [warn]
@@ -347,6 +401,8 @@ class TourProcessor:
             draft = draft_from_row(row)
         if draft is None:
             raise ValueError("Keine Sendungsdaten – bitte Adresse speichern")
+
+        draft = self._apply_address_book(draft)
 
         address_override = self._address_override_from_row(row)
         if self.settings.post_address_validate_enabled and not address_override:
