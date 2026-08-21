@@ -54,6 +54,8 @@ class AddressBook:
                   WHERE soloplan_matchcode IS NOT NULL AND soloplan_matchcode != '';
                 CREATE INDEX IF NOT EXISTS idx_addrbook_namezip
                   ON recipient_address_book(name_zip_key);
+                CREATE INDEX IF NOT EXISTS idx_addrbook_bp
+                  ON recipient_address_book(soloplan_bp_id);
                 """
             )
 
@@ -167,15 +169,26 @@ class AddressBook:
         self,
         *,
         soloplan_matchcode: str | None = None,
+        soloplan_bp_id: str | None = None,
         name1: str | None = None,
         zip_code: str | None = None,
     ) -> dict[str, Any] | None:
         mc = normalize_matchcode(soloplan_matchcode)
+        bp = str(soloplan_bp_id or "").strip()
         with self._conn_factory() as conn:
             if mc:
                 row = conn.execute(
                     "SELECT * FROM recipient_address_book WHERE soloplan_matchcode = ?",
                     (mc,),
+                ).fetchone()
+                if row:
+                    return dict(row)
+            if bp:
+                row = conn.execute(
+                    """SELECT * FROM recipient_address_book
+                       WHERE soloplan_bp_id = ?
+                       ORDER BY updated_at DESC LIMIT 1""",
+                    (bp,),
                 ).fetchone()
                 if row:
                     return dict(row)
@@ -218,12 +231,26 @@ class AddressBook:
         recipient: Address,
         *,
         soloplan_matchcode: str | None = None,
+        soloplan_bp_id: str | None = None,
     ) -> tuple[Address, dict[str, Any] | None]:
+        """Ersetzt Soloplan-Adresse durch bekannte Korrektur, falls vorhanden."""
         entry = self.lookup(
             soloplan_matchcode=soloplan_matchcode,
+            soloplan_bp_id=soloplan_bp_id,
             name1=recipient.name1,
             zip_code=recipient.zip_code,
         )
         if not entry:
             return recipient, None
         return self.to_address(entry), entry
+
+    @staticmethod
+    def recipient_changed(before: Address, after: Address) -> bool:
+        return (
+            (before.name1 or "").strip() != (after.name1 or "").strip()
+            or (before.name2 or "").strip() != (after.name2 or "").strip()
+            or (before.street or "").strip() != (after.street or "").strip()
+            or (before.zip_code or "").strip() != (after.zip_code or "").strip()
+            or (before.city or "").strip() != (after.city or "").strip()
+            or (before.country or "CH").strip().upper() != (after.country or "CH").strip().upper()
+        )

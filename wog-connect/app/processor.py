@@ -64,21 +64,47 @@ class TourProcessor:
         self.address_validator = AddressValidator(self.settings, self.post)
 
 
-    def _apply_address_book(self, draft: ShipmentDraft) -> ShipmentDraft:
-        """Ersetzt Empfängeradresse durch Korrektur aus dem Adressbuch (Soloplan-Matchcode)."""
+    def _apply_address_book(
+        self,
+        draft: ShipmentDraft,
+        *,
+        shipment_id: str | None = None,
+        persist: bool = False,
+        product_id: str | None = None,
+    ) -> tuple[ShipmentDraft, dict | None]:
+        """Ersetzt Empfängeradresse durch bekannte Korrektur (Soloplan-Matchcode/BP).
+
+        Wenn Soloplan erneut denselben Kunden liefert, gewinnt die Adressbuch-Korrektur.
+        """
         book = self.storage.get_address_book()
         new_recipient, entry = book.apply_to_draft_recipient(
             draft.recipient,
             soloplan_matchcode=getattr(draft, "recipient_matchcode", "") or "",
+            soloplan_bp_id=getattr(draft, "recipient_bp_id", "") or "",
         )
         if not entry:
-            return draft
-        return replace(
+            return draft, None
+        updated = replace(
             draft,
             recipient=new_recipient,
             recipient_matchcode=entry.get("soloplan_matchcode") or draft.recipient_matchcode,
             recipient_bp_id=entry.get("soloplan_bp_id") or draft.recipient_bp_id,
         )
+        if persist and shipment_id:
+            pid = product_id or "eco"
+            draft_data = draft_to_dict(updated, delivery_product_id=pid)
+            row = self.storage.get_shipment(shipment_id) or {}
+            if row.get("draft_json"):
+                try:
+                    base = json.loads(row["draft_json"])
+                    if base.get("tracking"):
+                        draft_data["tracking"] = base["tracking"]
+                    if base.get("address_validation"):
+                        draft_data["address_validation"] = base["address_validation"]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            self.storage.update_shipment_details(shipment_id, draft_data)
+        return updated, entry
 
 
     def save_recipient_to_address_book(self, shipment_id: str) -> dict:
@@ -151,15 +177,73 @@ class TourProcessor:
         shipment_ids: list[str] = []
         skipped = 0
         for draft in drafts:
-            if self.storage.find_shipment_key(tour_id, draft.transport_order_number, draft.item_number):
+            existing = self.storage.find_shipment_key(
+                tour_id, draft.transport_order_number, draft.item_number
+            )
+            if existing:
                 skipped += 1
+                # Bekannte Korrektur erneut anwenden (Soloplan liefert oft weiter die alte Adresse)
+                self._refresh_existing_from_address_book(existing["id"], draft)
                 continue
-            draft = self._apply_address_book(draft)
+            draft, _entry = self._apply_address_book(draft)
             sid = self.storage.add_shipment(tour_id, draft)
             shipment_ids.append(sid)
             if auto_label:
                 self.generate_label(sid)
         return shipment_ids, skipped
+
+    def _refresh_existing_from_address_book(
+        self, shipment_id: str, soloplan_draft: ShipmentDraft
+    ) -> bool:
+        """Bei Re-Import: Soloplan-Matchcode nachziehen und Adressbuch-Korrektur speichern."""
+        row = self.storage.get_shipment(shipment_id)
+        if not row:
+            return False
+        # Labels nicht anfassen – nur offene/fehlerhafte Sendungen aktualisieren
+        status = (row.get("status") or "").strip()
+        if row.get("identcode") or status in ("label_created", "handed_over", "delivered"):
+            return False
+        current = draft_from_row(row)
+        if current is None:
+            return False
+        merged = replace(
+            current,
+            recipient=soloplan_draft.recipient,
+            recipient_matchcode=soloplan_draft.recipient_matchcode or current.recipient_matchcode,
+            recipient_bp_id=soloplan_draft.recipient_bp_id or current.recipient_bp_id,
+        )
+        product_id = str(row.get("delivery_product_id") or "eco")
+        updated, entry = self._apply_address_book(
+            merged,
+            shipment_id=shipment_id,
+            persist=True,
+            product_id=product_id,
+        )
+        if not entry:
+            # Mindestens Matchcode/BP aus Soloplan nachziehen
+            if (
+                merged.recipient_matchcode != current.recipient_matchcode
+                or merged.recipient_bp_id != current.recipient_bp_id
+            ):
+                keep = replace(
+                    current,
+                    recipient_matchcode=merged.recipient_matchcode,
+                    recipient_bp_id=merged.recipient_bp_id,
+                )
+                draft_data = draft_to_dict(keep, delivery_product_id=product_id)
+                if row.get("draft_json"):
+                    try:
+                        base = json.loads(row["draft_json"])
+                        if base.get("tracking"):
+                            draft_data["tracking"] = base["tracking"]
+                        if base.get("address_validation"):
+                            draft_data["address_validation"] = base["address_validation"]
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                self.storage.update_shipment_details(shipment_id, draft_data)
+                return True
+            return False
+        return True
 
     def ingest_bytes(self, filename: str, content: bytes, *, auto_label: bool = False) -> dict:
         data, meta, drafts = self._parse_tour_content(content)
@@ -339,6 +423,14 @@ class TourProcessor:
         draft = self.get_draft(shipment_id)
         if not draft:
             raise ValueError("Sendung nicht gefunden")
+        row = self.storage.get_shipment(shipment_id) or {}
+        product_id = str(row.get("delivery_product_id") or "eco")
+        draft, _entry = self._apply_address_book(
+            draft,
+            shipment_id=shipment_id,
+            persist=True,
+            product_id=product_id,
+        )
         draft, result, applied = self._validate_and_apply_address(shipment_id, draft)
         return {"ok": True, "shipmentId": shipment_id, "applied": applied, **result.to_dict()}
 
@@ -369,6 +461,13 @@ class TourProcessor:
             draft = draft_from_row(row)
             if not draft:
                 continue
+            product_id = str(row.get("delivery_product_id") or "eco")
+            draft, _entry = self._apply_address_book(
+                draft,
+                shipment_id=row["id"],
+                persist=True,
+                product_id=product_id,
+            )
             draft, res, applied = self._validate_and_apply_address(row["id"], draft)
             if applied:
                 applied_count += 1
@@ -402,7 +501,13 @@ class TourProcessor:
         if draft is None:
             raise ValueError("Keine Sendungsdaten – bitte Adresse speichern")
 
-        draft = self._apply_address_book(draft)
+        product_id = row.get("delivery_product_id") or "eco"
+        draft, book_entry = self._apply_address_book(
+            draft,
+            shipment_id=shipment_id,
+            persist=True,
+            product_id=str(product_id),
+        )
 
         address_override = self._address_override_from_row(row)
         if self.settings.post_address_validate_enabled and not address_override:
@@ -417,6 +522,7 @@ class TourProcessor:
                     "error": msg,
                     "addressInvalid": True,
                     "saved": True,
+                    "addressBookApplied": bool(book_entry),
                 }
             row = self.storage.get_shipment(shipment_id) or row
 
