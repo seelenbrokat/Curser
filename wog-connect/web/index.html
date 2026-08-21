@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WOG Connect · Post-Labels</title>
+  <link rel="stylesheet" href="/static/app.css?v=20260821b">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">WOG Connect<span class="tagline">Soloplan → Schweizer Post</span></div>
+      <div class="header-actions">
+        <button type="button" class="ghost sm" id="reloadBtn">Aktualisieren</button>
+        <button type="button" class="ghost sm" id="logoutBtn">Abmelden</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="stats-bar">
+      <div class="stat"><span class="stat-label">Offen</span><strong class="stat-value" id="kpiOpen">—</strong></div>
+      <div class="stat"><span class="stat-label">Label erstellt</span><strong class="stat-value" id="kpiLabel">—</strong></div>
+      <div class="stat"><span class="stat-label">Zugestellt</span><strong class="stat-value" id="kpiDone">—</strong></div>
+      <div class="stat stat-err"><span class="stat-label">Fehler</span><strong class="stat-value" id="kpiErr">—</strong></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">Tour</div>
+      <div class="panel-body">
+        <div class="form-row filter-row">
+          <div>
+            <label for="filterTour">Tournummer</label>
+            <input id="filterTour" type="text" placeholder="z. B. 183401">
+          </div>
+          <div>
+            <label for="filterDate">Datum (optional)</label>
+            <input id="filterDate" type="date">
+          </div>
+          <div class="filter-actions">
+            <button type="button" id="applyFilters">Tour laden</button>
+            <button type="button" class="secondary" id="clearFilters">Zurücksetzen</button>
+          </div>
+        </div>
+        <p class="hint" id="tourHint">Standard: Sendungen von heute ohne Label. Optional Tournummer laden für Sammelaktionen (Adressen prüfen, alle Labels, PDF).</p>
+
+        <div class="tour-toolbar hidden" id="tourActions">
+          <button type="button" class="secondary" id="validateTourBtn">Adressen prüfen</button>
+          <button type="button" class="primary" id="bulkLabelsBtn">Alle Labels erzeugen</button>
+          <button type="button" class="primary" id="tourPdfBtn">Alle Labels als PDF</button>
+          <a id="tourZipLink" href="#"><button type="button" class="secondary">Labels ZIP</button></a>
+          <div id="bulkMsg" class="status-msg info hidden"></div>
+        </div>
+        <div class="progress hidden" id="labelProgress">
+          <div class="progress-bar" id="labelProgressBar"></div>
+          <span id="labelProgressText" class="muted"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">Sendungen</div>
+      <div class="tabs">
+        <button class="tab active" data-filter="pending">Zu drucken</button>
+        <button class="tab" data-filter="tracking">Unterwegs</button>
+        <button class="tab" data-filter="open">Offen</button>
+        <button class="tab" data-filter="all">Alle</button>
+        <button class="tab" data-filter="delivered">Zugestellt</button>
+      </div>
+      <div id="list" class="shipment-list"></div>
+    </section>
+
+
+
+    <section class="panel" id="addressBookPanel">
+      <div class="panel-head faq-head">
+        <span>Empfänger-Adressbuch <span class="muted">(Soloplan-Korrekturen)</span></span>
+        <button type="button" class="ghost sm" id="addressBookToggle" aria-expanded="false">Anzeigen</button>
+      </div>
+      <div class="panel-body faq-body hidden" id="addressBookBody">
+        <p class="hint">Korrigierte Empfängeradressen, verknüpft mit Soloplan-Matchcode/Kundennummer. Kommt derselbe Empfänger erneut aus Soloplan, wird automatisch die korrigierte Adresse verwendet.</p>
+        <div id="addressBookList" class="address-book-list muted">Noch keine Einträge.</div>
+      </div>
+    </section>
+
+    <section class="panel" id="faqPanel">
+      <div class="panel-head faq-head">
+        <span>FAQ – Zustellarten &amp; Ablieferbelege</span>
+        <button type="button" class="ghost sm" id="faqToggle" aria-expanded="false">Anzeigen</button>
+      </div>
+      <div class="panel-body faq-body hidden" id="faqBody">
+        <p class="hint">Kurz erklärt, was die Zustellarten bedeuten. Standard bleibt immer PostPac Priority <strong>ohne</strong> Unterschrift – Signature nur bei bewusster Auswahl.</p>
+        <div id="faqList" class="faq-list"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">Post-Rechnung</div>
+      <div class="panel-body">
+        <p class="hint">Excel/CSV aus dem Post-Rechnungsmanager. Zuordnung über Identcode und Soloplan-Sendungsnummer (order.sendungsnummer → Post itemID).</p>
+        <div class="billing-import-row">
+          <input type="file" id="billingFile" accept=".xlsx,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
+          <button type="button" class="secondary" id="billingImportBtn">Rechnung importieren</button>
+        </div>
+        <div id="billingMsg" class="status-msg info hidden"></div>
+        <div id="billingHistory" class="billing-history muted"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="editModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Sendung bearbeiten</h2>
+        <button type="button" class="secondary sm" id="closeModal">Schließen</button>
+      </div>
+      <form id="editForm">
+        <input type="hidden" id="editId">
+        <h3 class="section">Empfänger</h3>
+        <label>Name / Firma</label>
+        <input id="editName" required>
+        <label>Ansprechpartner (optional)</label>
+        <input id="editName2" placeholder="Abteilung oder Kontaktperson">
+        <label>Straße & Hausnummer</label>
+        <input id="editStreet" required>
+        <div class="form-row">
+          <div><label>PLZ</label><input id="editZip" required></div>
+          <div><label>Ort</label><input id="editCity" required></div>
+        </div>
+        <label>Land</label>
+        <input id="editCountry" maxlength="2" value="CH">
+        <label>E-Mail (optional)</label>
+        <input id="editEmail" type="email">
+        <label class="checkbox-row">
+          <input type="checkbox" id="editNotify" checked>
+          Empfänger per E-Mail über Sendungsstatus informieren
+        </label>
+        <h3 class="section">Zustellung</h3>
+        <label>Zustellart</label>
+        <select id="editDelivery"></select>
+        <p class="hint" id="editDeliveryHint">Standard: Economy ohne Unterschrift. Signature nur bei Bedarf wählen – siehe FAQ.</p>
+        <div class="form-row">
+          <div><label>Gewicht (Gramm)</label><input id="editWeight" type="number" min="1" step="1"></div>
+          <div><label>Packstücke</label><input id="editPackstuecke" type="number" min="1" step="1" value="1"></div>
+        </div>
+        <p id="editWeightWarn" class="weight-warn-text hidden"></p>
+        <p class="hint" id="editMatchcodeHint">Soloplan-Matchcode: —</p>
+        <label class="checkbox-row">
+          <input type="checkbox" id="editSaveAddressBook">
+          Korrigierte Adresse zum Adressbuch hinzufügen
+        </label>
+        <div class="actions">
+          <button type="button" class="secondary" id="validateAddressBtn">Adresse prüfen</button>
+          <button type="button" class="secondary hidden" id="applySuggestionBtn">Vorschlag übernehmen</button>
+          <button type="button" class="secondary hidden" id="acceptAddressBtn">Adresse trotzdem verwenden</button>
+          <button type="submit">Speichern</button>
+          <button type="button" class="primary" id="saveAndLabelBtn">Speichern & Label</button>
+        </div>
+      </form>
+      <p id="editMsg" class="muted hidden" style="margin:0 16px 16px;padding:8px 10px;background:var(--surface-2);border-radius:var(--radius)"></p>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=20260821b"></script>
+</body>
+</html>
