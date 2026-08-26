@@ -1047,26 +1047,80 @@ class TourProcessor:
             "errors": errors[:20],
         }
 
-    def process_incoming_dir(self) -> list[dict]:
+    def process_incoming_dir(self, *, min_age_seconds: float = 20.0) -> list[dict]:
+        """Verarbeitet Soloplan-Tour-JSONs aus dem Upload-Ordner.
+
+        Wartet kurz, bis die Datei stabil ist (SFTP-Upload), und versucht
+        fehlgeschlagene Dateien aus error/ erneut – sonst bleiben Touren
+        unsichtbar, obwohl die Datei schon da ist.
+        """
+        import time
+
         incoming = self.settings.incoming_dir
         incoming.mkdir(parents=True, exist_ok=True)
-        (incoming / "processed").mkdir(exist_ok=True)
-        (incoming / "error").mkdir(exist_ok=True)
-        results = []
-        paths = sorted(incoming.glob("*.json")) + sorted(incoming.glob("*.JSON"))
-        for path in paths:
+        processed_dir = incoming / "processed"
+        error_dir = incoming / "error"
+        processed_dir.mkdir(exist_ok=True)
+        error_dir.mkdir(exist_ok=True)
+        results: list[dict] = []
+
+        fresh = sorted(incoming.glob("*.json")) + sorted(incoming.glob("*.JSON"))
+        retries = sorted(error_dir.glob("*.json")) + sorted(error_dir.glob("*.JSON"))
+        now = time.time()
+
+        for path in fresh + retries:
             if not path.is_file():
                 continue
             try:
+                age = now - path.stat().st_mtime
+            except OSError:
+                continue
+            # Noch im Upload / gerade geschrieben → nächsten Scan abwarten
+            if age < min_age_seconds:
+                results.append({
+                    "file": path.name,
+                    "ok": False,
+                    "skipped": True,
+                    "reason": f"Datei noch zu neu ({age:.0f}s < {min_age_seconds:.0f}s)",
+                })
+                continue
+            try:
+                size1 = path.stat().st_size
+                time.sleep(0.3)
+                size2 = path.stat().st_size
+                if size1 != size2:
+                    results.append({
+                        "file": path.name,
+                        "ok": False,
+                        "skipped": True,
+                        "reason": "Datei wächst noch (Upload)",
+                    })
+                    continue
                 content = path.read_bytes()
                 res = self.ingest_bytes(path.name, content, auto_label=False)
-                done = incoming / "processed" / path.name
+                done = processed_dir / path.name
+                if done.exists():
+                    done.unlink()
                 path.rename(done)
                 results.append({"file": path.name, **res})
             except Exception as e:
-                err = incoming / "error" / path.name
-                if path.exists():
-                    path.rename(err)
+                print(f"incoming ingest failed for {path.name}: {e}", flush=True)
+                # Unvollständiges JSON während Upload nicht endgültig nach error schieben
+                transient = isinstance(e, (json.JSONDecodeError, UnicodeDecodeError))
+                if transient and age < 120:
+                    results.append({
+                        "file": path.name,
+                        "ok": False,
+                        "retry": True,
+                        "error": str(e),
+                    })
+                    continue
+                err = error_dir / path.name
+                if path.resolve() != err.resolve():
+                    if err.exists():
+                        err.unlink()
+                    if path.exists():
+                        path.rename(err)
                 results.append({"file": path.name, "ok": False, "error": str(e)})
         return results
 
