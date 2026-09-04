@@ -433,6 +433,21 @@ def push_shippingnet_delivered(shipment_id: str, request: Request):
     return result
 
 
+@app.post("/api/v1/shipments/{shipment_id}/portal-ablieferbeleg")
+def push_portal_ablieferbeleg(shipment_id: str, request: Request):
+    """Manuell: Ablieferbeleg-PDF als POD an das WOG-Kundenportal senden."""
+    require_login(request)
+    row = storage.get_shipment(shipment_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    result = processor.push_portal_ablieferbeleg(shipment_id, force=True)
+    if result.get("skipped") and result.get("reason") == "not_configured":
+        raise HTTPException(status_code=503, detail="Portal-Ablieferbeleg-API nicht konfiguriert")
+    if not result.get("ok") and not result.get("skipped"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "Portal-Upload fehlgeschlagen")
+    return result
+
+
 @app.post("/api/v1/tracking/sync")
 def sync_tracking(request: Request, _=Depends(require_api_key)):
     return processor.sync_tracking()
