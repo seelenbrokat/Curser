@@ -179,6 +179,7 @@ def list_shipments(
     status: str | None = None,
     tour_number: str | None = None,
     date: str | None = None,
+    q: str | None = None,
 ):
     require_login(request)
     rows = [_enrich_shipment_row(r) for r in storage.list_shipments(
@@ -186,6 +187,7 @@ def list_shipments(
         open_only=open_only,
         tour_number=tour_number,
         date=date,
+        q=q,
     )]
     rows = _attach_billing(rows)
     return {"ok": True, "shipments": rows, "count": len(rows)}

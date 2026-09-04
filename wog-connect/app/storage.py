@@ -347,8 +347,9 @@ class Storage:
         open_only: bool = False,
         tour_number: str | None = None,
         date: str | None = None,
+        q: str | None = None,
     ) -> list[dict[str, Any]]:
-        q = """
+        sql = """
             SELECT s.*, t.tour_number, t.ext_tour_number, t.tour_planned_date, t.uploaded_at AS tour_uploaded_at,
                    (SELECT COUNT(*) FROM shipment_labels sl WHERE sl.shipment_id = s.id) AS label_count
             FROM shipments s
@@ -357,25 +358,52 @@ class Storage:
         """
         params: list[Any] = []
         if open_only:
-            q += f" AND s.status IN ({','.join('?' for _ in OPEN_STATUSES)})"
+            sql += f" AND s.status IN ({','.join('?' for _ in OPEN_STATUSES)})"
             params.extend(OPEN_STATUSES)
         elif status:
-            q += " AND s.status = ?"
+            sql += " AND s.status = ?"
             params.append(status)
         if tour_number:
-            q += " AND (t.tour_number = ? OR t.ext_tour_number = ?)"
+            sql += " AND (t.tour_number = ? OR t.ext_tour_number = ?)"
             params.extend([tour_number.strip(), tour_number.strip()])
-        if date:
+        # Nummernsuche: ohne Datumsfilter, sonst findet man alte Labels nicht
+        search = (q or "").strip()
+        if search:
+            like = f"%{search}%"
+            digits = re.sub(r"\D", "", search)
+            sql += """ AND (
+                IFNULL(s.sendungsnummer, '') LIKE ?
+                OR IFNULL(s.identcode, '') LIKE ?
+                OR IFNULL(s.item_id, '') LIKE ?
+                OR IFNULL(s.external_number, '') LIKE ?
+                OR IFNULL(s.external_order_number, '') LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM shipment_labels sl
+                    WHERE sl.shipment_id = s.id AND IFNULL(sl.identcode, '') LIKE ?
+                )
+            """
+            params.extend([like, like, like, like, like, like])
+            if digits and digits != search:
+                dlike = f"%{digits}%"
+                sql += """ OR REPLACE(REPLACE(IFNULL(s.identcode, ''), ' ', ''), '-', '') LIKE ?
+                    OR EXISTS (
+                        SELECT 1 FROM shipment_labels sl
+                        WHERE sl.shipment_id = s.id
+                          AND REPLACE(REPLACE(IFNULL(sl.identcode, ''), ' ', ''), '-', '') LIKE ?
+                    )"""
+                params.extend([dlike, dlike])
+            sql += ")"
+        elif date:
             day = date.strip()[:10]
-            q += """ AND (
+            sql += """ AND (
                 date(substr(t.tour_planned_date, 1, 10)) = ?
                 OR date(substr(t.uploaded_at, 1, 10)) = ?
                 OR date(substr(s.created_at, 1, 10)) = ?
             )"""
             params.extend([day, day, day])
-        q += " ORDER BY s.created_at DESC"
+        sql += " ORDER BY s.created_at DESC"
         with self._conn() as conn:
-            rows = conn.execute(q, params).fetchall()
+            rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def find_tour_by_export_reference(self, export_reference: str) -> dict[str, Any] | None:

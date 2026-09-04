@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WOG Connect · Post-Labels</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260821a">
+  <link rel="stylesheet" href="/static/app.css?v=20260904a">
 </head>
 <body>
   <header class="app-header">
@@ -42,7 +42,16 @@
             <button type="button" class="secondary" id="clearFilters">Zurücksetzen</button>
           </div>
         </div>
-        <p class="hint" id="tourHint">Standard: Sendungen von heute ohne Label. Optional Tournummer laden für Sammelaktionen (Adressen prüfen, alle Labels, PDF).</p>
+        <div class="form-row filter-row search-row">
+          <div class="search-field">
+            <label for="filterSearch">Sendungsnummer suchen</label>
+            <input id="filterSearch" type="search" placeholder="Post-Identcode oder Soloplan-Sendungsnummer" autocomplete="off">
+          </div>
+          <div class="filter-actions">
+            <button type="button" id="applySearch">Suchen</button>
+          </div>
+        </div>
+        <p class="hint" id="tourHint">Standard: Sendungen von heute ohne Label. Optional Tournummer laden oder nach Post-/Soloplan-Sendungsnummer suchen.</p>
 
         <div class="tour-toolbar hidden" id="tourActions">
           <button type="button" class="secondary" id="validateTourBtn">Adressen prüfen</button>
@@ -78,7 +87,7 @@
         <button type="button" class="ghost sm" id="addressBookToggle" aria-expanded="false">Anzeigen</button>
       </div>
       <div class="panel-body faq-body hidden" id="addressBookBody">
-        <p class="hint">Korrigierte Empfängeradressen, verknüpft mit Soloplan-Matchcode. Beim nächsten Import/Label wird die Korrektur automatisch verwendet.</p>
+        <p class="hint">Korrigierte Empfängeradressen, verknüpft mit Soloplan-Matchcode/Kundennummer. Kommt derselbe Empfänger erneut aus Soloplan, wird automatisch die korrigierte Adresse verwendet.</p>
         <div id="addressBookList" class="address-book-list muted">Noch keine Einträge.</div>
       </div>
     </section>
@@ -161,6 +170,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=20260821a"></script>
+  <script src="/static/app.js?v=20260904a"></script>
 </body>
 </html>

@@ -175,6 +175,19 @@ input::placeholder { color: var(--text-soft); }
   align-items: end;
 }
 
+.search-row {
+  grid-template-columns: 1fr auto;
+  margin-top: 10px;
+}
+
+.search-field {
+  min-width: 0;
+}
+
+.search-field input {
+  width: 100%;
+}
+
 .filter-actions {
   display: flex;
   gap: 8px;
@@ -619,7 +632,7 @@ button.label-btn {
 
 @media (max-width: 768px) {
   .stats-bar { grid-template-columns: repeat(2, 1fr); }
-  .form-row, .filter-row { grid-template-columns: 1fr; }
+  .form-row, .filter-row, .search-row { grid-template-columns: 1fr; }
   .brand .tagline { display: block; margin: 2px 0 0; }
 }
 

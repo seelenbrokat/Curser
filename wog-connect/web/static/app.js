@@ -3,6 +3,7 @@ let filter = 'pending';
 let deliveryProducts = [];
 let queryTour = '';
 let queryDate = todayISO();
+let querySearch = '';
 
 function todayISO() {
   const d = new Date();
@@ -614,6 +615,10 @@ async function generateLabel(id, reload = true) {
 
 function buildQuery() {
   const params = new URLSearchParams({ open_only: 'false' });
+  if (querySearch) {
+    params.set('q', querySearch);
+    return params.toString();
+  }
   if (queryTour) params.set('tour_number', queryTour);
   // Unterwegs / Zugestellt über alle Tage – sonst verschwinden heutige Übergaben mit ältem Tour-Datum
   if (queryDate && filter !== 'tracking' && filter !== 'delivered') {
@@ -766,8 +771,21 @@ async function load() {
   const data = await api(`/api/v1/shipments?${buildQuery()}`);
   shipments = data.shipments || [];
   updateTourActions();
+  updateSearchHint();
   renderKpis(shipments);
   renderList();
+}
+
+function updateSearchHint() {
+  const hint = document.getElementById('tourHint');
+  if (!hint) return;
+  if (querySearch) {
+    hint.textContent = `Suche „${querySearch}“: ${shipments.length} Treffer (Post-Identcode / Soloplan-Sendungsnummer).`;
+  } else if (queryTour) {
+    hint.textContent = `Tour ${queryTour} geladen. Sammelaktionen unten verfügbar.`;
+  } else {
+    hint.textContent = 'Standard: Sendungen von heute ohne Label. Optional Tournummer laden oder nach Post-/Soloplan-Sendungsnummer suchen.';
+  }
 }
 
 document.getElementById('editForm').addEventListener('submit', async (e) => {
@@ -797,13 +815,39 @@ document.querySelectorAll('.tab').forEach((btn) => {
 document.getElementById('applyFilters').addEventListener('click', async () => {
   queryTour = document.getElementById('filterTour').value.trim();
   queryDate = document.getElementById('filterDate').value;
+  querySearch = '';
+  const searchInput = document.getElementById('filterSearch');
+  if (searchInput) searchInput.value = '';
   await load();
+});
+
+async function runShipmentSearch() {
+  querySearch = document.getElementById('filterSearch').value.trim();
+  if (!querySearch) {
+    await load();
+    return;
+  }
+  // Nummernsuche über alle Status/Tage
+  queryTour = '';
+  document.getElementById('filterTour').value = '';
+  activateTab('all');
+  await load();
+}
+
+document.getElementById('applySearch').addEventListener('click', runShipmentSearch);
+document.getElementById('filterSearch').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    runShipmentSearch();
+  }
 });
 
 document.getElementById('clearFilters').addEventListener('click', async () => {
   queryTour = '';
+  querySearch = '';
   queryDate = todayISO();
   document.getElementById('filterTour').value = '';
+  document.getElementById('filterSearch').value = '';
   document.getElementById('filterDate').value = queryDate;
   activateTab('pending');
   document.getElementById('bulkMsg').classList.add('hidden');
