@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WOG Connect · Post-Labels</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260904a">
+  <link rel="stylesheet" href="/static/app.css?v=20260905a">
 </head>
 <body>
   <header class="app-header">
@@ -104,14 +104,15 @@
     </section>
 
     <section class="panel">
-      <div class="panel-head">Post-Rechnung</div>
+      <div class="panel-head">Post-Rechnung / Weiterverrechnung</div>
       <div class="panel-body">
-        <p class="hint">Excel/CSV aus dem Post-Rechnungsmanager. Zuordnung über Identcode und Soloplan-Sendungsnummer (order.sendungsnummer → Post itemID).</p>
+        <p class="hint">Excel/CSV aus dem Post-Rechnungsmanager <strong>oder</strong> Verarbeitungsnachweis-PDF (PvE). Zuordnung über Identcode → Soloplan-Sendungsnummer; Mehrkosten werden für die Kunden-Weiterverrechnung ausgewiesen.</p>
         <div class="billing-import-row">
-          <input type="file" id="billingFile" accept=".xlsx,.xlsm,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
-          <button type="button" class="secondary" id="billingImportBtn">Rechnung importieren</button>
+          <input id="billingFile" type="file" accept=".xlsx,.xlsm,.csv,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv">
+          <button type="button" class="secondary" id="billingImportBtn">Datei auswerten</button>
         </div>
         <div id="billingMsg" class="status-msg info hidden"></div>
+        <div id="billingSurchargeReport" class="billing-surcharge-report hidden"></div>
         <div id="billingHistory" class="billing-history muted"></div>
       </div>
     </section>
@@ -170,6 +171,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=20260904a"></script>
+  <script src="/static/app.js?v=20260905a"></script>
 </body>
 </html>

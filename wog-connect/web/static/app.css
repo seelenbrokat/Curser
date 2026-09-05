@@ -503,6 +503,48 @@ button.label-btn {
   font-weight: 500;
 }
 
+.billing-surcharge-report {
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+
+.billing-surcharge-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.billing-surcharge-list {
+  display: grid;
+  gap: 10px;
+}
+
+.billing-surcharge-item {
+  padding: 10px 12px;
+  background: #fff;
+  border-left: 3px solid var(--warn-text, #c62828);
+  border-radius: 4px;
+}
+
+.billing-surcharge-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.billing-surcharge-item .meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.billing-surcharge-item ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
 /* Modal */
 .modal {
   position: fixed;

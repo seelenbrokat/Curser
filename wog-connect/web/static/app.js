@@ -733,13 +733,18 @@ async function importBillingFile() {
   const input = document.getElementById('billingFile');
   const msg = document.getElementById('billingMsg');
   const btn = document.getElementById('billingImportBtn');
+  const report = document.getElementById('billingSurchargeReport');
   const file = input?.files?.[0];
   if (!file) {
-    setStatusMsg(msg, 'Bitte zuerst eine Excel- oder CSV-Datei wählen.', 'err');
+    setStatusMsg(msg, 'Bitte zuerst Excel/CSV oder Verarbeitungsnachweis-PDF wählen.', 'err');
     return;
   }
   btn.disabled = true;
-  setStatusMsg(msg, 'Import läuft …', 'info');
+  if (report) {
+    report.classList.add('hidden');
+    report.innerHTML = '';
+  }
+  setStatusMsg(msg, 'Auswertung läuft …', 'info');
   try {
     const body = new FormData();
     body.append('file', file);
@@ -747,17 +752,14 @@ async function importBillingFile() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     const warn = (data.warnings || []).join(' ');
-    const extra = data.surcharge_hints ? ` · ${data.surcharge_hints} Position(en) mit Mehrkosten-Hinweis` : '';
-    const examples = (data.matched_examples || [])
-      .filter((x) => x.soloplan_label)
-      .slice(0, 3)
-      .map((x) => `${x.soloplan_label}${x.match_method === 'soloplan_ref' ? ' (über Soloplan-Ref.)' : ''}`)
-      .join('; ');
+    const extra = data.surcharge_hints ? ` · ${data.surcharge_hints} Mehrkosten-Position(en)` : '';
+    const surchargeTotal = data.surcharge_total_chf != null ? ` · Weiterverrechnung CHF ${Number(data.surcharge_total_chf).toFixed(2)}` : '';
     setStatusMsg(
       msg,
-      `${data.matched_count}/${data.row_count} Zeilen zugeordnet · Total CHF ${data.total_chf?.toFixed?.(2) ?? data.total_chf}${extra}${examples ? ` · ${examples}` : ''}${warn ? ` · ${warn}` : ''}`,
+      `${data.matched_count}/${data.row_count} Zeilen zugeordnet · Total CHF ${data.total_chf?.toFixed?.(2) ?? data.total_chf}${extra}${surchargeTotal}${warn ? ` · ${warn}` : ''}`,
       data.unmatched_count ? 'info' : 'ok',
     );
+    renderBillingSurchargeReport(data.weiterverrechnung || [], data.surcharge_total_chf);
     input.value = '';
     await Promise.all([loadBillingHistory(), load()]);
   } catch (e) {
@@ -765,6 +767,41 @@ async function importBillingFile() {
   } finally {
     btn.disabled = false;
   }
+}
+
+function renderBillingSurchargeReport(rows, total) {
+  const box = document.getElementById('billingSurchargeReport');
+  if (!box) return;
+  if (!rows.length) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  const items = rows.map((r) => {
+    const reasons = (r.reasons || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+    return `<article class="billing-surcharge-item">
+      <div class="billing-surcharge-head">
+        <strong>Soloplan ${escapeHtml(r.soloplan || '—')}</strong>
+        <span>Mehrkosten CHF ${Number(r.surcharge_chf || 0).toFixed(2)}</span>
+      </div>
+      <div class="meta">${escapeHtml(r.sender || '—')} → ${escapeHtml(r.recipient || '—')}</div>
+      <div class="meta">Ident ${escapeHtml(r.identcode || '—')} · Total Post CHF ${Number(r.total_chf || 0).toFixed(2)}</div>
+      <ul>${reasons}</ul>
+    </article>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="billing-surcharge-title">Weiterverrechnung Mehrkosten${total != null ? ` · Summe CHF ${Number(total).toFixed(2)}` : ''}</div>
+    <div class="billing-surcharge-list">${items}</div>
+  `;
+  box.classList.remove('hidden');
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 async function load() {

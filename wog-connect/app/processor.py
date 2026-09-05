@@ -1393,6 +1393,7 @@ class TourProcessor:
         lines_out: list[dict] = []
         surcharge_hints = 0
         matched_examples: list[dict] = []
+        weiterverrechnung: list[dict] = []
         for line in parsed.lines:
             shipment_id = None
             match_method = None
@@ -1404,7 +1405,11 @@ class TourProcessor:
                 shipment_id = self.storage.find_shipment_id_by_reference(line.customer_ref)
                 if shipment_id:
                     match_method = "soloplan_ref"
-            if line.product_label and is_surcharge_hint(line.product_label):
+            raw = dict(line.raw or {})
+            is_extra = bool(raw.get("is_surcharge")) or (
+                line.product_label and is_surcharge_hint(line.product_label)
+            )
+            if is_extra:
                 surcharge_hints += 1
             entry = {
                 "identcode": line.identcode,
@@ -1415,7 +1420,7 @@ class TourProcessor:
                 "customer_ref": line.customer_ref,
                 "shipment_id": shipment_id,
                 "match_method": match_method,
-                "raw": line.raw,
+                "raw": raw,
             }
             lines_out.append(entry)
             if shipment_id and len(matched_examples) < 5:
@@ -1429,6 +1434,44 @@ class TourProcessor:
                         "item_id": refs.get("item_id"),
                     }
                 )
+            if is_extra:
+                soloplan = ""
+                recipient = ""
+                sender = ""
+                if shipment_id:
+                    refs = self.storage.get_soloplan_refs(shipment_id) or {}
+                    row = self.storage.get_shipment(shipment_id) or {}
+                    soloplan = str(
+                        refs.get("sendungsnummer")
+                        or row.get("sendungsnummer")
+                        or ""
+                    )
+                    recipient = str(row.get("recipient_name") or "")
+                    try:
+                        draft = json.loads(row.get("draft_json") or "{}")
+                        sender = str((draft.get("sender") or {}).get("name1") or "")
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        sender = ""
+                weiterverrechnung.append(
+                    {
+                        "identcode": line.identcode,
+                        "soloplan": soloplan or None,
+                        "recipient": recipient or None,
+                        "sender": sender or None,
+                        "product": raw.get("product") or line.product_label,
+                        "weight_stage": raw.get("weight_stage"),
+                        "package_chf": raw.get("package_chf"),
+                        "zl_code": raw.get("zl_code"),
+                        "zl_chf": raw.get("zl_chf"),
+                        "surcharge_chf": raw.get("surcharge_chf")
+                        or round((line.amount_cents or 0) / 100, 2),
+                        "total_chf": raw.get("total_chf")
+                        or round((line.amount_cents or 0) / 100, 2),
+                        "reasons": raw.get("reasons") or [line.product_label],
+                        "extras": raw.get("extras") or [],
+                        "matched": bool(shipment_id),
+                    }
+                )
         result = self.storage.save_billing_import(
             filename,
             lines_out,
@@ -1439,9 +1482,12 @@ class TourProcessor:
                 "columns": parsed.columns,
                 "warnings": parsed.warnings,
                 "surcharge_hints": surcharge_hints,
+                "weiterverrechnung_count": len(weiterverrechnung),
+                "source": "pve_pdf" if (filename or "").lower().endswith(".pdf") else "spreadsheet",
             },
         )
         total_cents = sum(l["amount_cents"] for l in lines_out)
+        surcharge_total = round(sum(float(x.get("surcharge_chf") or 0) for x in weiterverrechnung), 2)
         return {
             "ok": True,
             "filename": filename,
@@ -1451,6 +1497,8 @@ class TourProcessor:
             "warnings": parsed.warnings,
             "total_chf": round(total_cents / 100, 2),
             "surcharge_hints": surcharge_hints,
+            "surcharge_total_chf": surcharge_total,
+            "weiterverrechnung": weiterverrechnung,
             "matched_examples": matched_examples,
             **result,
         }
