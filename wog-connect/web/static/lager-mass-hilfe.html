@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lager · Paket / Sperrgut / Überlänge</title>
+  <style>
+    :root {
+      --ok: #1b7f4a;
+      --ok-bg: #e7f6ee;
+      --warn: #b86a00;
+      --warn-bg: #fff4e0;
+      --bad: #b00020;
+      --bad-bg: #fde8ec;
+      --ink: #14201a;
+      --muted: #4d5a53;
+      --line: #d7ddd9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background: #f3f5f4;
+    }
+    .sheet {
+      max-width: 1100px;
+      margin: 16px auto;
+      background: #fff;
+      border: 1px solid var(--line);
+      padding: 18px 20px 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: end;
+      border-bottom: 3px solid var(--ink);
+      padding-bottom: 10px;
+      margin-bottom: 16px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.55rem;
+      letter-spacing: 0.02em;
+    }
+    header p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    .card {
+      border-radius: 10px;
+      padding: 16px 18px;
+      border: 2px solid transparent;
+    }
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 1.35rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .price {
+      font-size: 1.5rem;
+      white-space: nowrap;
+    }
+    .card ul {
+      margin: 8px 0 0;
+      padding-left: 1.2rem;
+      font-size: 1.05rem;
+      line-height: 1.45;
+    }
+    .ok { background: var(--ok-bg); border-color: var(--ok); }
+    .ok h2, .ok .price { color: var(--ok); }
+    .warn { background: var(--warn-bg); border-color: var(--warn); }
+    .warn h2, .warn .price { color: var(--warn); }
+    .bad { background: var(--bad-bg); border-color: var(--bad); }
+    .bad h2, .bad .price { color: var(--bad); }
+    .arrow {
+      text-align: center;
+      font-size: 1.4rem;
+      color: var(--muted);
+      font-weight: 700;
+      margin: -4px 0;
+    }
+    .ruler {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .ruler div {
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      font-size: 0.95rem;
+    }
+    .ruler strong { display: block; font-size: 1.15rem; margin-bottom: 2px; }
+    .note {
+      margin-top: 14px;
+      font-size: 0.92rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .gurt {
+      margin-top: 8px;
+      padding: 8px 10px;
+      background: rgba(0,0,0,0.04);
+      border-radius: 6px;
+      font-size: 0.98rem;
+    }
+    @media print {
+      body { background: #fff; }
+      .sheet { border: none; margin: 0; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <header>
+      <div>
+        <h1>Welche Paket-Art?</h1>
+        <p>Lagerhilfe · Schweizer Post · WOG Logistics</p>
+      </div>
+      <p>Preise gemäss Angebot Juli 2026 (exkl. MWST)</p>
+    </header>
+
+    <div class="flow">
+      <section class="card ok">
+        <h2><span>1 · NORMALPAKET (PostPac Priority)</span><span class="price">CHF 9.05</span></h2>
+        <ul>
+          <li>Längste Seite <strong>höchstens 100 cm</strong></li>
+          <li>Format max. <strong>60 × 60 × 100 cm</strong></li>
+          <li>Gewicht max. <strong>30 kg</strong></li>
+          <li>Gut verpackt, normale Adressetikette</li>
+        </ul>
+      </section>
+
+      <div class="arrow">↓ wenn grösser / unverpackt / Anhängeetikette ↓</div>
+
+      <section class="card warn">
+        <h2><span>2 · SPERRGUT</span><span class="price">CHF 20.75</span></h2>
+        <ul>
+          <li>Länge <strong>über 100 cm</strong> <em>oder</em></li>
+          <li><strong>zwei Seiten über 60 cm</strong> <em>oder</em></li>
+          <li>unverpackt <em>oder</em> Anhängeetikette</li>
+        </ul>
+        <div class="gurt">
+          <strong>Sperrgut-Maximum:</strong>
+          bis 200 cm Länge / 30 kg ·
+          200–250 cm nur bis 10 kg ·
+          Gurtmass max. 400 cm
+          <br>(Gurtmass = 2×Höhe + 2×Breite + längste Seite)
+        </div>
+      </section>
+
+      <div class="arrow">↓ wenn noch länger / zu schwer für Sperrgut-Max ↓</div>
+
+      <section class="card bad">
+        <h2><span>3 · ÜBERLÄNGE (Zuschlag LE1)</span><span class="price">+ CHF 135</span></h2>
+        <ul>
+          <li>Länge <strong>über 250 cm</strong> <em>oder</em></li>
+          <li>Länge <strong>über 200 cm und Gewicht über 10 kg</strong></li>
+          <li>Zusätzlich zum Sperrgut-Preis · vor Aufgabe klären</li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="ruler">
+      <div><strong>≤ 100 cm</strong>Normal · CHF 9.05</div>
+      <div><strong>100–200 cm</strong>Sperrgut · CHF 20.75</div>
+      <div><strong>&gt; 200 cm + &gt;10 kg<br>oder &gt; 250 cm</strong>Überlänge · + CHF 135</div>
+    </div>
+
+    <p class="note">
+      Economy-Preise: PostPac CHF 8.30 · Sperrgut CHF 19.25.
+      Weitere Zuschläge (z. B. manuelle Verarbeitung, Zustellfenster) kommen separat dazu.
+      Bei Unsicherheit: messen, wiegen, Schichtleitung fragen.
+    </p>
+  </main>
+</body>
+</html>
