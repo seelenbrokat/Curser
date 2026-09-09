@@ -313,7 +313,11 @@ class Storage:
                 base = json.loads(row["draft_json"])
             except json.JSONDecodeError:
                 base = {}
-        base["tracking"] = snapshot
+        # Merge statt Replace: sonst gehen PDF-/POD-/DVD-Flags bei jedem Sync verloren
+        # und der Ablieferbeleg wird fälschlich immer wieder (oder nie stabil) erzeugt.
+        prev = base.get("tracking") if isinstance(base.get("tracking"), dict) else {}
+        merged = {**prev, **(snapshot or {})}
+        base["tracking"] = merged
         with self._conn() as conn:
             conn.execute(
                 "UPDATE shipments SET draft_json = ?, updated_at = ? WHERE id = ?",
@@ -516,8 +520,10 @@ class Storage:
     def list_trackable_shipments(self) -> list[dict[str, Any]]:
         """Sendungen mit Identcode, die noch getrackt werden sollen.
 
-        Inkl. kürzlich zugestellte (Woche), damit der Status stabil bleibt
-        und Ablieferbelege nachgezogen werden können.
+        Offene Label/Übergabe immer. Zugestellte:
+        - kürzlich (7 Tage) zur Status-Stabilisierung
+        - oder ohne Ablieferbeleg / Portal-POD / shipping.NET-DVD,
+          damit PDF+Nachzug nicht nach einer Woche „vergessen“ werden.
         """
         with self._conn() as conn:
             rows = conn.execute(
@@ -528,8 +534,28 @@ class Storage:
                        s.status IN ('label_created', 'handed_over')
                        OR (
                          s.status = 'delivered'
-                         AND substr(COALESCE(s.updated_at, s.created_at), 1, 10)
-                             >= date('now', '-7 day')
+                         AND (
+                           substr(COALESCE(s.updated_at, s.created_at), 1, 10)
+                               >= date('now', '-7 day')
+                           OR nullif(
+                                trim(coalesce(
+                                  json_extract(s.draft_json, '$.tracking.delivery_proof_export'), ''
+                                )),
+                                ''
+                              ) IS NULL
+                           OR nullif(
+                                trim(coalesce(
+                                  json_extract(s.draft_json, '$.tracking.portal_ablieferbeleg_at'), ''
+                                )),
+                                ''
+                              ) IS NULL
+                           OR nullif(
+                                trim(coalesce(
+                                  json_extract(s.draft_json, '$.tracking.shippingnet_dvd_at'), ''
+                                )),
+                                ''
+                              ) IS NULL
+                         )
                        )
                      )
                    ORDER BY s.updated_at DESC"""

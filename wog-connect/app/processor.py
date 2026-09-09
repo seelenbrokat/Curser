@@ -1216,15 +1216,20 @@ class TourProcessor:
 
                 is_delivered = newly_delivered or row.get("status") == "delivered" or status == "delivered"
                 if is_delivered:
+                    # Frischen Draft lesen (Snapshot oben merged Flags nicht mehr weg)
+                    fresh = self.storage.get_shipment(row["id"]) or row
                     cached = {}
-                    if row.get("draft_json"):
+                    if fresh.get("draft_json"):
                         try:
-                            cached = json.loads(row["draft_json"]).get("tracking") or {}
+                            cached = json.loads(fresh["draft_json"]).get("tracking") or {}
                         except (json.JSONDecodeError, TypeError, AttributeError):
                             cached = {}
                     export_name = cached.get("delivery_proof_export") or ""
                     export_path = Path(self.settings.delivery_proofs_export_dir) / export_name if export_name else None
-                    needs_export = not export_name or not export_path or not export_path.is_file()
+                    local_proof = self.storage.delivery_proofs_dir / f"{row['id']}.pdf"
+                    needs_export = not (
+                        (export_path and export_path.is_file()) or local_proof.is_file()
+                    )
                     if needs_export:
                         try:
                             self.build_delivery_proof(row["id"])
