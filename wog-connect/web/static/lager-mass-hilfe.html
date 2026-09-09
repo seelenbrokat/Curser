@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lager · Paket / Sperrgut / Überlänge</title>
+  <style>
+    :root {
+      --ok: #0f7a3a;
+      --ok-bg: #d9f2e4;
+      --warn: #a35a00;
+      --warn-bg: #ffe8bf;
+      --bad: #a1001c;
+      --bad-bg: #ffd6de;
+      --ink: #111;
+      --muted: #444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background: #ececec;
+    }
+    .sheet {
+      max-width: 900px;
+      margin: 12px auto;
+      background: #fff;
+      padding: 16px 18px 20px;
+      border: 1px solid #ccc;
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 1.8rem;
+      text-align: center;
+    }
+    .sub {
+      text-align: center;
+      color: var(--muted);
+      margin: 0 0 14px;
+      font-size: 0.98rem;
+    }
+    .step {
+      border: 3px solid;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin: 0;
+    }
+    .step.ok { border-color: var(--ok); background: var(--ok-bg); }
+    .step.warn { border-color: var(--warn); background: var(--warn-bg); }
+    .step.bad { border-color: var(--bad); background: var(--bad-bg); }
+    .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .head .nr {
+      font-size: 1.55rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+    .ok .nr, .ok .chf { color: var(--ok); }
+    .warn .nr, .warn .chf { color: var(--warn); }
+    .bad .nr, .bad .chf { color: var(--bad); }
+    .chf {
+      font-size: 1.7rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .rule {
+      font-size: 1.22rem;
+      font-weight: 700;
+      margin: 0 0 6px;
+      line-height: 1.3;
+    }
+    ul {
+      margin: 0;
+      padding-left: 1.25rem;
+      font-size: 1.08rem;
+      line-height: 1.4;
+    }
+    .arrow {
+      text-align: center;
+      font-size: 1.55rem;
+      font-weight: 800;
+      color: #555;
+      margin: 6px 0;
+      line-height: 1.1;
+    }
+    .bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .bar div {
+      text-align: center;
+      border: 2px solid #bbb;
+      border-radius: 8px;
+      padding: 10px 6px;
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+    .bar .a { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+    .bar .b { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
+    .bar .c { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+    .bar strong { display: block; font-size: 1.25rem; margin-bottom: 2px; }
+    .foot {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.35;
+    }
+    @media print {
+      body { background: #fff; }
+      .sheet { border: none; margin: 0; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <h1>Paket · Sperrgut · Überlänge</h1>
+    <p class="sub">Aushang Lager · messen → entscheiden → Etikette · Preise Angebot Post (exkl. MWST)</p>
+
+    <section class="step ok">
+      <div class="head">
+        <div class="nr">1 · NORMAL (PostPac Priority)</div>
+      </div>
+      <p class="rule">Nur wenn ALLES gilt:</p>
+      <ul>
+        <li>längste Seite ≤ <strong>100 cm</strong></li>
+        <li>Format max. <strong>60 × 60 × 100 cm</strong></li>
+        <li>Gewicht ≤ <strong>30 kg</strong></li>
+        <li>normal verpackt (keine Anhängeetikette)</li>
+      </ul>
+    </section>
+
+    <div class="arrow">↓ sonst ↓</div>
+
+    <section class="step warn">
+      <div class="head">
+        <div class="nr">2 · SPERRGUT Priority</div>
+        <div class="chf">CHF 20.75</div>
+      </div>
+      <p class="rule">Sobald EINES gilt:</p>
+      <ul>
+        <li>Länge <strong>&gt; 100 cm</strong></li>
+        <li>oder zwei Seiten <strong>&gt; 60 cm</strong></li>
+        <li>oder unverpackt / Anhängeetikette</li>
+      </ul>
+      <p class="rule" style="margin-top:8px;font-size:1.05rem;">Noch erlaubt als Sperrgut:</p>
+      <ul>
+        <li>bis <strong>200 cm</strong> / 30 kg · oder <strong>200–250 cm</strong> nur bis 10 kg</li>
+        <li>Gurtmass ≤ <strong>400 cm</strong> (2×H + 2×B + Länge)</li>
+      </ul>
+    </section>
+
+    <div class="arrow">↓ wenn länger / zu schwer für Sperrgut-Max ↓</div>
+
+    <section class="step bad">
+      <div class="head">
+        <div class="nr">3 · ÜBERLÄNGE (LE1)</div>
+        <div class="chf">+ CHF 135</div>
+      </div>
+      <p class="rule">Zusätzlich, wenn:</p>
+      <ul>
+        <li>Länge <strong>&gt; 250 cm</strong></li>
+        <li>oder Länge <strong>&gt; 200 cm und &gt; 10 kg</strong></li>
+      </ul>
+    </section>
+
+    <div class="bar">
+      <div class="a"><strong>≤ 100 cm</strong>Normal</div>
+      <div class="b"><strong>100–200 cm</strong>Sperrgut<br>CHF 20.75</div>
+      <div class="c"><strong>&gt;200 cm + &gt;10 kg<br>oder &gt;250 cm</strong>Überlänge<br>+ CHF 135</div>
+    </div>
+
+    <p class="foot">
+      Economy (falls gewählt): PostPac CHF 8.30 · Sperrgut CHF 19.25 ·
+      LE1 ist Post-Zuschlag (nicht im Einheitspreis) ·
+      andere Zuschläge (MAN/ZFZ …) extra
+    </p>
+  </main>
+</body>
+</html>
