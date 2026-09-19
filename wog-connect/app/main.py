@@ -179,6 +179,7 @@ def list_shipments(
     status: str | None = None,
     tour_number: str | None = None,
     date: str | None = None,
+    q: str | None = None,
 ):
     require_login(request)
     rows = [_enrich_shipment_row(r) for r in storage.list_shipments(
@@ -186,6 +187,7 @@ def list_shipments(
         open_only=open_only,
         tour_number=tour_number,
         date=date,
+        q=q,
     )]
     rows = _attach_billing(rows)
     return {"ok": True, "shipments": rows, "count": len(rows)}
@@ -358,9 +360,15 @@ async def update_status(shipment_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Not found")
     storage.update_shipment(shipment_id, status=status, delivered=(status == "delivered"))
     shippingnet = None
+    portal_tracking = None
+    if status == "handed_over":
+        portal_tracking = processor.push_portal_post_tracking(shipment_id, force=False)
+        shippingnet = processor.push_shippingnet_puc(shipment_id)
     if status == "delivered":
+        # PUC nachziehen falls noch nicht gesetzt, dann DVD
+        processor.push_shippingnet_puc(shipment_id)
         shippingnet = processor.push_shippingnet_delivered(shipment_id)
-    return {"ok": True, "shippingnet": shippingnet}
+    return {"ok": True, "shippingnet": shippingnet, "portalTracking": portal_tracking}
 
 
 @app.post("/api/v1/tours/{tour_ref}/generate-labels")
@@ -428,6 +436,51 @@ def push_shippingnet_delivered(shipment_id: str, request: Request):
     result = processor.push_shippingnet_delivered(shipment_id, force=True)
     if not result.get("ok") and not result.get("skipped"):
         raise HTTPException(status_code=502, detail=result.get("error") or "shipping.NET Fehler")
+    return result
+
+
+@app.post("/api/v1/shipments/{shipment_id}/shippingnet/puc")
+def push_shippingnet_puc(shipment_id: str, request: Request):
+    """Manuell: shipping.NET Status PUC (Abgeholt / an Post übergeben)."""
+    require_login(request)
+    row = storage.get_shipment(shipment_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    result = processor.push_shippingnet_puc(shipment_id, force=True)
+    if not result.get("ok") and not result.get("skipped"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "shipping.NET Fehler")
+    return result
+
+
+@app.post("/api/v1/shipments/{shipment_id}/portal-ablieferbeleg")
+def push_portal_ablieferbeleg(shipment_id: str, request: Request):
+    """Manuell: Ablieferbeleg-PDF als POD an das WOG-Kundenportal senden."""
+    require_login(request)
+    row = storage.get_shipment(shipment_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    result = processor.push_portal_ablieferbeleg(shipment_id, force=True)
+    if result.get("skipped") and result.get("reason") == "not_configured":
+        raise HTTPException(status_code=503, detail="Portal-Ablieferbeleg-API nicht konfiguriert")
+    if not result.get("ok") and not result.get("skipped"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "Portal-Upload fehlgeschlagen")
+    return result
+
+
+@app.post("/api/v1/shipments/{shipment_id}/portal-post-tracking")
+def push_portal_post_tracking(shipment_id: str, request: Request):
+    """Manuell: Post-Barcode an das WOG-Portal übergeben (Quehenberger-Tracking)."""
+    require_login(request)
+    row = storage.get_shipment(shipment_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    result = processor.push_portal_post_tracking(shipment_id, force=True)
+    if result.get("skipped") and result.get("reason") == "not_configured":
+        raise HTTPException(status_code=503, detail="Portal-API nicht konfiguriert")
+    if result.get("skipped") and result.get("reason") == "not_quehenberger":
+        raise HTTPException(status_code=400, detail="Keine Quehenberger-Sendung")
+    if not result.get("ok") and not result.get("skipped"):
+        raise HTTPException(status_code=502, detail=result.get("error") or "Portal-Tracking fehlgeschlagen")
     return result
 
 

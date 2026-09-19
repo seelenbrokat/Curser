@@ -18,6 +18,7 @@ from app.post_client import PostApiError, PostClient
 from app.soloplan_parser import ShipmentDraft, coerce_tour_document, parse_tour_json
 from app.storage import Storage
 from app.shippingnet_client import ShippingNetClient, ShippingNetError, normalize_shippingnet_status_date
+from app.portal_ablieferbeleg_client import PortalAblieferbelegClient, PortalAblieferbelegError
 from app.tracking_client import TrackingClient, primary_identcode, tracking_url
 from app.weight_util import weight_warning
 
@@ -61,24 +62,51 @@ class TourProcessor:
         self.post = PostClient(self.settings)
         self.tracking = TrackingClient()
         self.shippingnet = ShippingNetClient(self.settings)
+        self.portal_pod = PortalAblieferbelegClient(self.settings)
         self.address_validator = AddressValidator(self.settings, self.post)
 
 
-    def _apply_address_book(self, draft: ShipmentDraft) -> ShipmentDraft:
-        """Ersetzt Empfängeradresse durch Korrektur aus dem Adressbuch (Soloplan-Matchcode)."""
+    def _apply_address_book(
+        self,
+        draft: ShipmentDraft,
+        *,
+        shipment_id: str | None = None,
+        persist: bool = False,
+        product_id: str | None = None,
+    ) -> tuple[ShipmentDraft, dict | None]:
+        """Ersetzt Empfängeradresse durch bekannte Korrektur (Soloplan-Matchcode/BP).
+
+        Wenn Soloplan erneut denselben Kunden liefert, gewinnt die Adressbuch-Korrektur.
+        """
         book = self.storage.get_address_book()
         new_recipient, entry = book.apply_to_draft_recipient(
             draft.recipient,
             soloplan_matchcode=getattr(draft, "recipient_matchcode", "") or "",
+            soloplan_bp_id=getattr(draft, "recipient_bp_id", "") or "",
         )
         if not entry:
-            return draft
-        return replace(
+            return draft, None
+        updated = replace(
             draft,
             recipient=new_recipient,
             recipient_matchcode=entry.get("soloplan_matchcode") or draft.recipient_matchcode,
             recipient_bp_id=entry.get("soloplan_bp_id") or draft.recipient_bp_id,
         )
+        if persist and shipment_id:
+            pid = product_id or "eco"
+            draft_data = draft_to_dict(updated, delivery_product_id=pid)
+            row = self.storage.get_shipment(shipment_id) or {}
+            if row.get("draft_json"):
+                try:
+                    base = json.loads(row["draft_json"])
+                    if base.get("tracking"):
+                        draft_data["tracking"] = base["tracking"]
+                    if base.get("address_validation"):
+                        draft_data["address_validation"] = base["address_validation"]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            self.storage.update_shipment_details(shipment_id, draft_data)
+        return updated, entry
 
 
     def save_recipient_to_address_book(self, shipment_id: str) -> dict:
@@ -151,15 +179,73 @@ class TourProcessor:
         shipment_ids: list[str] = []
         skipped = 0
         for draft in drafts:
-            if self.storage.find_shipment_key(tour_id, draft.transport_order_number, draft.item_number):
+            existing = self.storage.find_shipment_key(
+                tour_id, draft.transport_order_number, draft.item_number
+            )
+            if existing:
                 skipped += 1
+                # Bekannte Korrektur erneut anwenden (Soloplan liefert oft weiter die alte Adresse)
+                self._refresh_existing_from_address_book(existing["id"], draft)
                 continue
-            draft = self._apply_address_book(draft)
+            draft, _entry = self._apply_address_book(draft)
             sid = self.storage.add_shipment(tour_id, draft)
             shipment_ids.append(sid)
             if auto_label:
                 self.generate_label(sid)
         return shipment_ids, skipped
+
+    def _refresh_existing_from_address_book(
+        self, shipment_id: str, soloplan_draft: ShipmentDraft
+    ) -> bool:
+        """Bei Re-Import: Soloplan-Matchcode nachziehen und Adressbuch-Korrektur speichern."""
+        row = self.storage.get_shipment(shipment_id)
+        if not row:
+            return False
+        # Labels nicht anfassen – nur offene/fehlerhafte Sendungen aktualisieren
+        status = (row.get("status") or "").strip()
+        if row.get("identcode") or status in ("label_created", "handed_over", "delivered"):
+            return False
+        current = draft_from_row(row)
+        if current is None:
+            return False
+        merged = replace(
+            current,
+            recipient=soloplan_draft.recipient,
+            recipient_matchcode=soloplan_draft.recipient_matchcode or current.recipient_matchcode,
+            recipient_bp_id=soloplan_draft.recipient_bp_id or current.recipient_bp_id,
+        )
+        product_id = str(row.get("delivery_product_id") or "eco")
+        updated, entry = self._apply_address_book(
+            merged,
+            shipment_id=shipment_id,
+            persist=True,
+            product_id=product_id,
+        )
+        if not entry:
+            # Mindestens Matchcode/BP aus Soloplan nachziehen
+            if (
+                merged.recipient_matchcode != current.recipient_matchcode
+                or merged.recipient_bp_id != current.recipient_bp_id
+            ):
+                keep = replace(
+                    current,
+                    recipient_matchcode=merged.recipient_matchcode,
+                    recipient_bp_id=merged.recipient_bp_id,
+                )
+                draft_data = draft_to_dict(keep, delivery_product_id=product_id)
+                if row.get("draft_json"):
+                    try:
+                        base = json.loads(row["draft_json"])
+                        if base.get("tracking"):
+                            draft_data["tracking"] = base["tracking"]
+                        if base.get("address_validation"):
+                            draft_data["address_validation"] = base["address_validation"]
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                self.storage.update_shipment_details(shipment_id, draft_data)
+                return True
+            return False
+        return True
 
     def ingest_bytes(self, filename: str, content: bytes, *, auto_label: bool = False) -> dict:
         data, meta, drafts = self._parse_tour_content(content)
@@ -339,6 +425,14 @@ class TourProcessor:
         draft = self.get_draft(shipment_id)
         if not draft:
             raise ValueError("Sendung nicht gefunden")
+        row = self.storage.get_shipment(shipment_id) or {}
+        product_id = str(row.get("delivery_product_id") or "eco")
+        draft, _entry = self._apply_address_book(
+            draft,
+            shipment_id=shipment_id,
+            persist=True,
+            product_id=product_id,
+        )
         draft, result, applied = self._validate_and_apply_address(shipment_id, draft)
         return {"ok": True, "shipmentId": shipment_id, "applied": applied, **result.to_dict()}
 
@@ -369,6 +463,13 @@ class TourProcessor:
             draft = draft_from_row(row)
             if not draft:
                 continue
+            product_id = str(row.get("delivery_product_id") or "eco")
+            draft, _entry = self._apply_address_book(
+                draft,
+                shipment_id=row["id"],
+                persist=True,
+                product_id=product_id,
+            )
             draft, res, applied = self._validate_and_apply_address(row["id"], draft)
             if applied:
                 applied_count += 1
@@ -402,7 +503,13 @@ class TourProcessor:
         if draft is None:
             raise ValueError("Keine Sendungsdaten – bitte Adresse speichern")
 
-        draft = self._apply_address_book(draft)
+        product_id = row.get("delivery_product_id") or "eco"
+        draft, book_entry = self._apply_address_book(
+            draft,
+            shipment_id=shipment_id,
+            persist=True,
+            product_id=str(product_id),
+        )
 
         address_override = self._address_override_from_row(row)
         if self.settings.post_address_validate_enabled and not address_override:
@@ -417,6 +524,7 @@ class TourProcessor:
                     "error": msg,
                     "addressInvalid": True,
                     "saved": True,
+                    "addressBookApplied": bool(book_entry),
                 }
             row = self.storage.get_shipment(shipment_id) or row
 
@@ -683,8 +791,26 @@ class TourProcessor:
                 # Status nur vorwärts setzen (nicht REPORTED → label_created zurückspringen)
                 if status == "delivered" and row.get("status") != "delivered":
                     self.storage.update_shipment(shipment_id, status="delivered", delivered=True)
+                    try:
+                        self.push_shippingnet_puc(shipment_id)
+                    except Exception:
+                        pass
+                    try:
+                        self.push_shippingnet_delivered(shipment_id)
+                    except Exception:
+                        pass
                 elif status == "handed_over" and row.get("status") in {"uploaded", "label_created", "error"}:
                     self.storage.update_shipment(shipment_id, status="handed_over", delivered=False)
+                    try:
+                        self.push_shippingnet_puc(shipment_id)
+                    except Exception:
+                        pass
+                elif status in {"handed_over", "delivered"}:
+                    # Nachziehen, falls PUC noch fehlt
+                    try:
+                        self.push_shippingnet_puc(shipment_id)
+                    except Exception:
+                        pass
                 synced_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
                 self.storage.save_tracking_snapshot(
                     shipment_id,
@@ -804,6 +930,110 @@ class TourProcessor:
                         return iso
         return None
 
+    def _resolve_handover_datetime(
+        self,
+        shipment_id: str,
+        status_date: datetime | str | None = None,
+    ) -> str | None:
+        """Zeitpunkt der Post-Übernahme / ersten Tracking-Events."""
+        iso = normalize_shippingnet_status_date(status_date)
+        if iso:
+            return iso
+        meta = self._shipment_meta(shipment_id)
+        cached = {}
+        try:
+            cached = json.loads(meta.get("draft_json") or "{}").get("tracking") or {}
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            cached = {}
+        for ev in cached.get("events") or []:
+            title = (ev.get("title") or "").lower()
+            detail = (ev.get("detail") or "").lower()
+            blob = f"{title} {detail}"
+            if any(
+                k in blob
+                for k in (
+                    "übernommen",
+                    "angenommen",
+                    "eingeliefert",
+                    "elektronisch",
+                    "handover",
+                    "accepted",
+                    "posted",
+                )
+            ):
+                found = normalize_shippingnet_status_date(ev.get("at"))
+                if found:
+                    return found
+        # Fallback: ältestes Event
+        for ev in reversed(cached.get("events") or []):
+            found = normalize_shippingnet_status_date(ev.get("at"))
+            if found:
+                return found
+        return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    def push_shippingnet_puc(
+        self,
+        shipment_id: str,
+        *,
+        status_date: datetime | str | None = None,
+        force: bool = False,
+    ) -> dict:
+        """Setzt in shipping.NET den Zwischenstatus PUC (Abgeholt = an Post übergeben)."""
+        if not self.shippingnet.enabled:
+            return {"ok": False, "skipped": True, "reason": "not_configured"}
+        meta = self._shipment_meta(shipment_id)
+        number = self.shippingnet_shipment_number(meta)
+        cached = {}
+        try:
+            cached = json.loads(meta.get("draft_json") or "{}").get("tracking") or {}
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            cached = {}
+        if cached.get("shippingnet_puc_at") and not force:
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "already_pushed",
+                "shipmentNumber": number,
+                "shippingnet_puc_at": cached.get("shippingnet_puc_at"),
+            }
+        barcode = primary_identcode(meta.get("identcode")) or ""
+        status_id = self.settings.shippingnet_handover_status_id or "PUC"
+        desc = "An Schweizer Post übergeben"
+        if barcode:
+            desc = f"{desc} · Identcode {barcode}"
+        resolved = self._resolve_handover_datetime(shipment_id, status_date)
+        try:
+            result = self.shippingnet.mark_picked_up(
+                number,
+                description=desc,
+                status_date=resolved,
+                status_id=status_id,
+            )
+            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            self.storage.save_tracking_snapshot(
+                shipment_id,
+                {
+                    **cached,
+                    "shippingnet_puc_at": now,
+                    "shippingnet_puc_status_id": status_id,
+                    "shippingnet_puc_status_date": resolved,
+                    "shippingnet_shipment_number": number,
+                    "shippingnet_puc_error": "",
+                    "shippingnet_puc_response": result if isinstance(result, dict) else {"raw": str(result)},
+                },
+            )
+            return {"ok": True, "shipmentNumber": number, "statusId": status_id, "result": result}
+        except ShippingNetError as e:
+            self.storage.save_tracking_snapshot(
+                shipment_id,
+                {
+                    **cached,
+                    "shippingnet_puc_error": str(e),
+                    "shippingnet_shipment_number": number,
+                },
+            )
+            return {"ok": False, "shipmentNumber": number, "statusId": status_id, "error": str(e)}
+
     def push_shippingnet_delivered(
         self,
         shipment_id: str,
@@ -866,6 +1096,95 @@ class TourProcessor:
                 },
             )
             return {"ok": False, "shipmentNumber": number, "error": str(e)}
+
+    def push_portal_ablieferbeleg(
+        self,
+        shipment_id: str,
+        *,
+        pdf: bytes | None = None,
+        status_date: datetime | str | None = None,
+        force: bool = False,
+        mark_delivered: bool = True,
+    ) -> dict:
+        """Lädt den Ablieferbeleg als POD an das WOG-Kundenportal hoch."""
+        if not self.portal_pod.enabled:
+            return {"ok": False, "skipped": True, "reason": "not_configured"}
+        meta = self._shipment_meta(shipment_id)
+        number = self.shippingnet_shipment_number(meta)
+        barcode = primary_identcode(meta.get("identcode")) or ""
+        cached = {}
+        try:
+            cached = json.loads(meta.get("draft_json") or "{}").get("tracking") or {}
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            cached = {}
+        if cached.get("portal_ablieferbeleg_at") and not force:
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "already_pushed",
+                "shipmentNumber": number,
+                "portal_ablieferbeleg_at": cached.get("portal_ablieferbeleg_at"),
+            }
+
+        pdf_bytes = pdf
+        filename = cached.get("delivery_proof_export") or f"{number}.pdf"
+        if pdf_bytes is None:
+            export_name = cached.get("delivery_proof_export") or ""
+            export_path = Path(self.settings.delivery_proofs_export_dir) / export_name if export_name else None
+            local_path = self.storage.delivery_proofs_dir / f"{shipment_id}.pdf"
+            for candidate in (export_path, local_path):
+                if candidate and candidate.is_file():
+                    pdf_bytes = candidate.read_bytes()
+                    filename = candidate.name
+                    break
+        if not pdf_bytes:
+            err = "Kein Ablieferbeleg-PDF vorhanden – bitte zuerst erzeugen"
+            self.storage.save_tracking_snapshot(
+                shipment_id,
+                {**cached, "portal_ablieferbeleg_error": err, "portal_ablieferbeleg_shipment_number": number},
+            )
+            return {"ok": False, "shipmentNumber": number, "error": err}
+
+        delivered_at = self._resolve_delivery_datetime(shipment_id, status_date)
+        try:
+            result = self.portal_pod.upload_pdf(
+                pdf_bytes,
+                filename=str(filename),
+                shipment_number=number,
+                post_barcode=barcode or None,
+                delivered_at=delivered_at,
+                mark_delivered=mark_delivered,
+            )
+            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            self.storage.save_tracking_snapshot(
+                shipment_id,
+                {
+                    **cached,
+                    "portal_ablieferbeleg_at": now,
+                    "portal_ablieferbeleg_shipment_number": number,
+                    "portal_ablieferbeleg_barcode": barcode,
+                    "portal_ablieferbeleg_error": "",
+                    "portal_ablieferbeleg_response": result if isinstance(result, dict) else {"raw": str(result)},
+                },
+            )
+            return {
+                "ok": True,
+                "shipmentNumber": number,
+                "postBarcode": barcode,
+                "duplicated": bool(isinstance(result, dict) and result.get("duplicated")),
+                "result": result,
+            }
+        except PortalAblieferbelegError as e:
+            self.storage.save_tracking_snapshot(
+                shipment_id,
+                {
+                    **cached,
+                    "portal_ablieferbeleg_error": str(e),
+                    "portal_ablieferbeleg_shipment_number": number,
+                    "portal_ablieferbeleg_barcode": barcode,
+                },
+            )
+            return {"ok": False, "shipmentNumber": number, "postBarcode": barcode, "error": str(e)}
 
     def export_delivery_proof_file(self, shipment_id: str, pdf: bytes, shipment: dict | None = None) -> Path:
         """Speichert Ablieferbeleg zusätzlich im SFTP-Ordner für Abholung."""
@@ -966,6 +1285,15 @@ class TourProcessor:
                 "delivery_proof_export_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             },
         )
+        # POD an WOG-Portal (sichtbar für Frachtzahler wie Quehenberger)
+        try:
+            self.push_portal_ablieferbeleg(
+                shipment_id,
+                pdf=pdf,
+                status_date=info.get("deliveryDate") or info.get("lastEventDateTime"),
+            )
+        except Exception:
+            pass
         return pdf, filename
 
     def sync_tracking(self) -> dict:
@@ -973,6 +1301,8 @@ class TourProcessor:
         checked = 0
         proofs_generated = 0
         shippingnet_pushed = 0
+        shippingnet_puc_pushed = 0
+        portal_pod_pushed = 0
         errors: list[str] = []
         for row in self.storage.list_trackable_shipments():
             checked += 1
@@ -1000,24 +1330,52 @@ class TourProcessor:
                     },
                 )
                 newly_delivered = status == "delivered" and row.get("status") != "delivered"
+                newly_handed_over = False
                 if newly_delivered:
                     self.storage.update_shipment(row["id"], status="delivered", delivered=True)
                     updated += 1
                 elif status == "handed_over" and row.get("status") in {"uploaded", "label_created", "error"}:
                     self.storage.update_shipment(row["id"], status="handed_over", delivered=False)
+                    newly_handed_over = True
                     updated += 1
+
+                is_handed_over = (
+                    newly_handed_over
+                    or row.get("status") == "handed_over"
+                    or status == "handed_over"
+                    or newly_delivered
+                    or row.get("status") == "delivered"
+                    or status == "delivered"
+                )
+                if is_handed_over:
+                    try:
+                        puc = self.push_shippingnet_puc(
+                            row["id"],
+                            status_date=info.get("sendingDateTime") or info.get("lastEventDateTime"),
+                        )
+                        if puc.get("ok") and not puc.get("skipped"):
+                            shippingnet_puc_pushed += 1
+                        elif not puc.get("ok") and not puc.get("skipped"):
+                            errors.append(f"{row['id']} shippingnet-puc: {puc.get('error')}")
+                    except Exception as pe:
+                        errors.append(f"{row['id']} shippingnet-puc: {pe}")
 
                 is_delivered = newly_delivered or row.get("status") == "delivered" or status == "delivered"
                 if is_delivered:
+                    # Frischen Draft lesen (Snapshot oben merged Flags nicht mehr weg)
+                    fresh = self.storage.get_shipment(row["id"]) or row
                     cached = {}
-                    if row.get("draft_json"):
+                    if fresh.get("draft_json"):
                         try:
-                            cached = json.loads(row["draft_json"]).get("tracking") or {}
+                            cached = json.loads(fresh["draft_json"]).get("tracking") or {}
                         except (json.JSONDecodeError, TypeError, AttributeError):
                             cached = {}
                     export_name = cached.get("delivery_proof_export") or ""
                     export_path = Path(self.settings.delivery_proofs_export_dir) / export_name if export_name else None
-                    needs_export = not export_name or not export_path or not export_path.is_file()
+                    local_proof = self.storage.delivery_proofs_dir / f"{row['id']}.pdf"
+                    needs_export = not (
+                        (export_path and export_path.is_file()) or local_proof.is_file()
+                    )
                     if needs_export:
                         try:
                             self.build_delivery_proof(row["id"])
@@ -1036,6 +1394,18 @@ class TourProcessor:
                             errors.append(f"{row['id']} shippingnet: {sn.get('error')}")
                     except Exception as se:
                         errors.append(f"{row['id']} shippingnet: {se}")
+                    # POD an Kundenportal (falls noch nicht beim Proof-Build)
+                    try:
+                        pod = self.push_portal_ablieferbeleg(
+                            row["id"],
+                            status_date=info.get("deliveryDate") or info.get("lastEventDateTime"),
+                        )
+                        if pod.get("ok") and not pod.get("skipped"):
+                            portal_pod_pushed += 1
+                        elif not pod.get("ok") and not pod.get("skipped"):
+                            errors.append(f"{row['id']} portal-pod: {pod.get('error')}")
+                    except Exception as pe:
+                        errors.append(f"{row['id']} portal-pod: {pe}")
             except Exception as e:
                 errors.append(f"{row['id']}: {e}")
         return {
@@ -1044,29 +1414,85 @@ class TourProcessor:
             "updated": updated,
             "proofs_generated": proofs_generated,
             "shippingnet_pushed": shippingnet_pushed,
+            "shippingnet_puc_pushed": shippingnet_puc_pushed,
+            "portal_ablieferbelege_pushed": portal_pod_pushed,
             "errors": errors[:20],
         }
 
-    def process_incoming_dir(self) -> list[dict]:
+    def process_incoming_dir(self, *, min_age_seconds: float = 20.0) -> list[dict]:
+        """Verarbeitet Soloplan-Tour-JSONs aus dem Upload-Ordner.
+
+        Wartet kurz, bis die Datei stabil ist (SFTP-Upload), und versucht
+        fehlgeschlagene Dateien aus error/ erneut – sonst bleiben Touren
+        unsichtbar, obwohl die Datei schon da ist.
+        """
+        import time
+
         incoming = self.settings.incoming_dir
         incoming.mkdir(parents=True, exist_ok=True)
-        (incoming / "processed").mkdir(exist_ok=True)
-        (incoming / "error").mkdir(exist_ok=True)
-        results = []
-        paths = sorted(incoming.glob("*.json")) + sorted(incoming.glob("*.JSON"))
-        for path in paths:
+        processed_dir = incoming / "processed"
+        error_dir = incoming / "error"
+        processed_dir.mkdir(exist_ok=True)
+        error_dir.mkdir(exist_ok=True)
+        results: list[dict] = []
+
+        fresh = sorted(incoming.glob("*.json")) + sorted(incoming.glob("*.JSON"))
+        retries = sorted(error_dir.glob("*.json")) + sorted(error_dir.glob("*.JSON"))
+        now = time.time()
+
+        for path in fresh + retries:
             if not path.is_file():
                 continue
             try:
+                age = now - path.stat().st_mtime
+            except OSError:
+                continue
+            # Noch im Upload / gerade geschrieben → nächsten Scan abwarten
+            if age < min_age_seconds:
+                results.append({
+                    "file": path.name,
+                    "ok": False,
+                    "skipped": True,
+                    "reason": f"Datei noch zu neu ({age:.0f}s < {min_age_seconds:.0f}s)",
+                })
+                continue
+            try:
+                size1 = path.stat().st_size
+                time.sleep(0.3)
+                size2 = path.stat().st_size
+                if size1 != size2:
+                    results.append({
+                        "file": path.name,
+                        "ok": False,
+                        "skipped": True,
+                        "reason": "Datei wächst noch (Upload)",
+                    })
+                    continue
                 content = path.read_bytes()
                 res = self.ingest_bytes(path.name, content, auto_label=False)
-                done = incoming / "processed" / path.name
+                done = processed_dir / path.name
+                if done.exists():
+                    done.unlink()
                 path.rename(done)
                 results.append({"file": path.name, **res})
             except Exception as e:
-                err = incoming / "error" / path.name
-                if path.exists():
-                    path.rename(err)
+                print(f"incoming ingest failed for {path.name}: {e}", flush=True)
+                # Unvollständiges JSON während Upload nicht endgültig nach error schieben
+                transient = isinstance(e, (json.JSONDecodeError, UnicodeDecodeError))
+                if transient and age < 120:
+                    results.append({
+                        "file": path.name,
+                        "ok": False,
+                        "retry": True,
+                        "error": str(e),
+                    })
+                    continue
+                err = error_dir / path.name
+                if path.resolve() != err.resolve():
+                    if err.exists():
+                        err.unlink()
+                    if path.exists():
+                        path.rename(err)
                 results.append({"file": path.name, "ok": False, "error": str(e)})
         return results
 
@@ -1119,6 +1545,7 @@ class TourProcessor:
         lines_out: list[dict] = []
         surcharge_hints = 0
         matched_examples: list[dict] = []
+        weiterverrechnung: list[dict] = []
         for line in parsed.lines:
             shipment_id = None
             match_method = None
@@ -1130,7 +1557,11 @@ class TourProcessor:
                 shipment_id = self.storage.find_shipment_id_by_reference(line.customer_ref)
                 if shipment_id:
                     match_method = "soloplan_ref"
-            if line.product_label and is_surcharge_hint(line.product_label):
+            raw = dict(line.raw or {})
+            is_extra = bool(raw.get("is_surcharge")) or (
+                line.product_label and is_surcharge_hint(line.product_label)
+            )
+            if is_extra:
                 surcharge_hints += 1
             entry = {
                 "identcode": line.identcode,
@@ -1141,7 +1572,7 @@ class TourProcessor:
                 "customer_ref": line.customer_ref,
                 "shipment_id": shipment_id,
                 "match_method": match_method,
-                "raw": line.raw,
+                "raw": raw,
             }
             lines_out.append(entry)
             if shipment_id and len(matched_examples) < 5:
@@ -1155,6 +1586,44 @@ class TourProcessor:
                         "item_id": refs.get("item_id"),
                     }
                 )
+            if is_extra:
+                soloplan = ""
+                recipient = ""
+                sender = ""
+                if shipment_id:
+                    refs = self.storage.get_soloplan_refs(shipment_id) or {}
+                    row = self.storage.get_shipment(shipment_id) or {}
+                    soloplan = str(
+                        refs.get("sendungsnummer")
+                        or row.get("sendungsnummer")
+                        or ""
+                    )
+                    recipient = str(row.get("recipient_name") or "")
+                    try:
+                        draft = json.loads(row.get("draft_json") or "{}")
+                        sender = str((draft.get("sender") or {}).get("name1") or "")
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        sender = ""
+                weiterverrechnung.append(
+                    {
+                        "identcode": line.identcode,
+                        "soloplan": soloplan or None,
+                        "recipient": recipient or None,
+                        "sender": sender or None,
+                        "product": raw.get("product") or line.product_label,
+                        "weight_stage": raw.get("weight_stage"),
+                        "package_chf": raw.get("package_chf"),
+                        "zl_code": raw.get("zl_code"),
+                        "zl_chf": raw.get("zl_chf"),
+                        "surcharge_chf": raw.get("surcharge_chf")
+                        or round((line.amount_cents or 0) / 100, 2),
+                        "total_chf": raw.get("total_chf")
+                        or round((line.amount_cents or 0) / 100, 2),
+                        "reasons": raw.get("reasons") or [line.product_label],
+                        "extras": raw.get("extras") or [],
+                        "matched": bool(shipment_id),
+                    }
+                )
         result = self.storage.save_billing_import(
             filename,
             lines_out,
@@ -1165,9 +1634,12 @@ class TourProcessor:
                 "columns": parsed.columns,
                 "warnings": parsed.warnings,
                 "surcharge_hints": surcharge_hints,
+                "weiterverrechnung_count": len(weiterverrechnung),
+                "source": "pve_pdf" if (filename or "").lower().endswith(".pdf") else "spreadsheet",
             },
         )
         total_cents = sum(l["amount_cents"] for l in lines_out)
+        surcharge_total = round(sum(float(x.get("surcharge_chf") or 0) for x in weiterverrechnung), 2)
         return {
             "ok": True,
             "filename": filename,
@@ -1177,6 +1649,8 @@ class TourProcessor:
             "warnings": parsed.warnings,
             "total_chf": round(total_cents / 100, 2),
             "surcharge_hints": surcharge_hints,
+            "surcharge_total_chf": surcharge_total,
+            "weiterverrechnung": weiterverrechnung,
             "matched_examples": matched_examples,
             **result,
         }
