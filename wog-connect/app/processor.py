@@ -21,6 +21,7 @@ from app.shippingnet_client import ShippingNetClient, ShippingNetError, normaliz
 from app.portal_ablieferbeleg_client import PortalAblieferbelegClient, PortalAblieferbelegError
 from app.tracking_client import TrackingClient, primary_identcode, tracking_url
 from app.weight_util import weight_warning
+from app.reference_util import sanitize_item_id
 
 
 
@@ -101,11 +102,14 @@ class TourProcessor:
         except (TypeError, ValueError):
             packstuecke = 1
 
-        reference = str(payload.get("reference") or payload.get("sendungsnummer") or "").strip()
+        # Post Barcode verlangt eine nicht-leere itemID (Pattern) – Referenz immer setzen.
+        reference = sanitize_item_id(
+            str(payload.get("reference") or payload.get("sendungsnummer") or "").strip()
+            or f"{account.username}-{int(__import__('time').time())}"
+        )
         content = str(payload.get("content") or "").strip()
-        notify = payload.get("notify_recipient")
-        if notify is None:
-            notify = bool(email)
+        # Avisierung über Barcode-API aktuell nicht nutzbar (HTTP 400) – Label hat Vorrang.
+        notify = False
 
         sender = Address(
             name1=account.sender_name1 or self.settings.post_sender_name1,
@@ -130,7 +134,7 @@ class TourProcessor:
             item_number=1,
             carrier_matchcode="POSTCH",
             consignment_reference="POST",
-            item_id=reference or "",
+            item_id=reference,
             recipient=recipient,
             sender=sender,
             weight_grams=weight_grams,
@@ -139,7 +143,7 @@ class TourProcessor:
             external_number=reference,
             sendungsnummer=reference,
             przl=przl_for_product(product_id),
-            notify_recipient=bool(notify),
+            notify_recipient=False,
         )
 
         tour_id = self.storage.get_or_create_customer_tour(account.username)

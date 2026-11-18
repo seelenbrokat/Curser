@@ -137,16 +137,14 @@ def build_post_request(
         "weight": max(1, int(shipment.weight_grams // piece_count) if piece_count > 1 else shipment.weight_grams),
     }
 
-    if settings.post_notifications_enabled and shipment.notify_recipient and shipment.recipient.email:
-        attributes["notifications"] = [
-            {
-                "type": "EMAIL",
-                "service": svc,
-                "language": settings.post_notification_language,
-                "communication": {"email": shipment.recipient.email.strip()},
-            }
-            for svc in settings.post_notification_services
-        ]
+    # E-Mail-Avisierung über Barcode-API liefert aktuell HTTP 400 (leerer Body).
+    # Deshalb hier nicht mitsenden – Label bleibt erzeugbar; Avisierung ggf. separat.
+
+    item_id = post_item_reference(
+        shipment,
+        piece_number=piece_number,
+        piece_count=piece_count,
+    )
 
     return {
         "language": settings.post_language,
@@ -162,11 +160,7 @@ def build_post_request(
             "printPreview": settings.post_print_preview,
         },
         "item": {
-            "itemID": post_item_reference(
-                shipment,
-                piece_number=piece_number,
-                piece_count=piece_count,
-            ),
+            "itemID": item_id,
             "recipient": recipient,
             "attributes": attributes,
         },

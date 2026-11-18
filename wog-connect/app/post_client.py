@@ -91,7 +91,10 @@ class PostClient:
                 timeout=90,
             )
         if resp.status_code >= 400:
-            raise PostApiError("Barcode API fehlgeschlagen", resp.status_code, resp.text)
+            detail = (resp.text or "").strip()
+            if not detail:
+                detail = f"HTTP {resp.status_code} (keine Detailmeldung der Post)"
+            raise PostApiError(f"Barcode API fehlgeschlagen: {detail[:400]}", resp.status_code, resp.text)
         return resp.json()
 
     @staticmethod

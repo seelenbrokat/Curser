@@ -1,3 +1,18 @@
+function formatApiError(data, fallback) {
+  const detail = data?.detail ?? data?.error;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => (typeof d === 'string' ? d : d?.msg || d?.message || JSON.stringify(d)))
+      .filter(Boolean)
+      .join('; ');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+  return fallback || 'Fehler';
+}
+
 async function api(url, opts = {}) {
   const res = await fetch(url, {
     credentials: 'same-origin',
@@ -10,7 +25,7 @@ async function api(url, opts = {}) {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.detail || data.error || res.statusText || 'Fehler');
+    throw new Error(formatApiError(data, res.statusText || 'Fehler'));
   }
   return data;
 }
