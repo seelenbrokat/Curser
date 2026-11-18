@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WOG Connect · Kundenportal</title>
+  <link rel="stylesheet" href="/static/app.css?v=20261118c">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">WOG Connect<span class="tagline" id="customerBrand">Kundenportal</span></div>
+      <div class="header-actions">
+        <button type="button" class="ghost sm" id="logoutBtn">Abmelden</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main customer-main">
+    <section class="panel">
+      <div class="panel-head">Neue Postsendung</div>
+      <div class="panel-body">
+        <p class="hint" id="senderHint">Absender wird aus Ihrem Kundenkonto übernommen.</p>
+        <div id="msg" class="status-msg info hidden"></div>
+        <form id="createForm" class="customer-form">
+          <div class="form-row">
+            <div>
+              <label for="name1">Empfänger Name *</label>
+              <input id="name1" required autocomplete="organization" placeholder="Firma oder Name">
+            </div>
+            <div>
+              <label for="name2">Zusatz</label>
+              <input id="name2" autocomplete="off" placeholder="z. B. z. Hd. …">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="span-2">
+              <label for="street">Strasse / Nr. *</label>
+              <input id="street" required autocomplete="street-address">
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <label for="zip">PLZ *</label>
+              <input id="zip" required autocomplete="postal-code" inputmode="numeric">
+            </div>
+            <div>
+              <label for="city">Ort *</label>
+              <input id="city" required autocomplete="address-level2">
+            </div>
+            <div>
+              <label for="country">Land</label>
+              <input id="country" value="CH" maxlength="2">
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <label for="email">E-Mail Empfänger</label>
+              <input id="email" type="email" autocomplete="email" placeholder="optional, für Avisierung">
+            </div>
+            <div>
+              <label for="reference">Ihre Referenz</label>
+              <input id="reference" placeholder="optional">
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <label for="delivery">Zustellart</label>
+              <select id="delivery"></select>
+            </div>
+            <div>
+              <label for="weight">Gewicht (Gramm)</label>
+              <input id="weight" type="number" min="1" step="1" value="1000">
+            </div>
+            <div>
+              <label for="packs">Packstücke</label>
+              <input id="packs" type="number" min="1" step="1" value="1">
+            </div>
+          </div>
+          <div class="form-row filter-actions">
+            <button type="submit" class="primary" id="submitBtn">Label erzeugen &amp; drucken</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">Meine Labels</div>
+      <div class="panel-body">
+        <div id="list" class="shipment-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/customer.js?v=20261118c"></script>
+</body>
+</html>
