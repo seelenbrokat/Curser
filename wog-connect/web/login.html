@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WOG Connect · Login</title>
+  <link rel="stylesheet" href="/static/app.css?v=20261118c">
+</head>
+<body class="login-page">
+  <div class="login-wrap">
+    <div class="login-head">
+      <h1>WOG Connect</h1>
+      <p>Post-Labels · Lager &amp; Kundenportal</p>
+    </div>
+    <div class="login-body">
+      <div id="err" class="alert error hidden"></div>
+      <form id="loginForm">
+        <label>Benutzername</label>
+        <input id="username" required autocomplete="username">
+        <label>Passwort</label>
+        <input id="password" type="password" required autocomplete="current-password">
+        <button type="submit" class="primary" style="width:100%;margin-top:16px">Einloggen</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = document.getElementById('err');
+      err.classList.add('hidden');
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          username: document.getElementById('username').value.trim(),
+          password: document.getElementById('password').value,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        location.href = data.redirect || (data.role === 'customer' ? '/kunde' : '/');
+        return;
+      }
+      err.textContent = 'Login fehlgeschlagen – Benutzername oder Passwort prüfen';
+      err.classList.remove('hidden');
+    });
+  </script>
+</body>
+</html>
